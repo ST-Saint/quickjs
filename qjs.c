@@ -105,6 +105,31 @@ static int eval_file(JSContext *ctx, const char *filename, int module)
     return ret;
 }
 
+int js_std_eval_file(JSContext *ctx, const char *filename, int module)
+{
+    uint8_t *buf;
+    int ret, eval_flags;
+    size_t buf_len;
+
+    buf = js_load_file(ctx, &buf_len, filename);
+    if (!buf) {
+        perror(filename);
+        exit(1);
+    }
+
+    if (module < 0) {
+        module = (has_suffix(filename, ".mjs") ||
+                  JS_DetectModule((const char *)buf, buf_len));
+    }
+    if (module)
+        eval_flags = JS_EVAL_TYPE_MODULE;
+    else
+        eval_flags = JS_EVAL_TYPE_GLOBAL;
+    ret = eval_buf(ctx, buf, buf_len, filename, eval_flags);
+    js_free(ctx, buf);
+    return ret;
+}
+
 /* also used to initialize the worker context */
 static JSContext *JS_NewCustomContext(JSRuntime *rt)
 {

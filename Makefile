@@ -143,6 +143,7 @@ ifdef CONFIG_WIN32
 DEFINES+=-D__USE_MINGW_ANSI_STDIO # for standard snprintf behavior
 endif
 
+CFLAGS+=-fPIC
 CFLAGS+=$(DEFINES)
 CFLAGS_DEBUG=$(CFLAGS) -O0
 CFLAGS_SMALL=$(CFLAGS) -Os
@@ -220,7 +221,7 @@ endif
 endif
 endif
 
-all: $(OBJDIR) $(OBJDIR)/quickjs.check.o $(OBJDIR)/qjs.check.o $(PROGS)
+all: $(OBJDIR) $(OBJDIR)/quickjs.check.o $(OBJDIR)/qjs.check.o $(PROGS) libqjs.so
 
 QJS_LIB_OBJS=$(OBJDIR)/quickjs.o $(OBJDIR)/libregexp.o $(OBJDIR)/libunicode.o $(OBJDIR)/cutils.o $(OBJDIR)/quickjs-libc.o $(OBJDIR)/libbf.o
 
@@ -241,6 +242,9 @@ $(OBJDIR):
 
 qjs$(EXE): $(QJS_OBJS)
 	$(CC) $(LDFLAGS) $(LDEXPORT) -o $@ $^ $(LIBS)
+
+libqjs.so: $(QJS_OBJS)
+	$(CC) $(LDFLAGS) -shared -fPIC -o $@ $^ $(LIBS)
 
 qjs-debug$(EXE): $(patsubst %.o, %.debug.o, $(QJS_OBJS))
 	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
@@ -346,7 +350,7 @@ unicode_gen: $(OBJDIR)/unicode_gen.host.o $(OBJDIR)/cutils.host.o libunicode.c u
 
 clean:
 	rm -f repl.c qjscalc.c out.c
-	rm -f *.a *.o *.d *~ unicode_gen regexp_test $(PROGS)
+	rm -f *.a *.o *.so *.d *~ unicode_gen regexp_test $(PROGS)
 	rm -f hello.c test_fib.c
 	rm -f examples/*.so tests/*.so
 	rm -rf $(OBJDIR)/ *.dSYM/ qjs-debug
@@ -372,8 +376,8 @@ endif
 # example of static JS compilation
 HELLO_SRCS=examples/hello.js
 HELLO_OPTS=-fno-string-normalize -fno-map -fno-promise -fno-typedarray \
-           -fno-typedarray -fno-regexp -fno-json -fno-eval -fno-proxy \
-           -fno-date -fno-module-loader -fno-bigint
+	   -fno-typedarray -fno-regexp -fno-json -fno-eval -fno-proxy \
+	   -fno-date -fno-module-loader -fno-bigint
 
 hello.c: $(QJSC) $(HELLO_SRCS)
 	$(QJSC) -e $(HELLO_OPTS) -o $@ $(HELLO_SRCS)
@@ -389,8 +393,8 @@ endif
 # example of static JS compilation with modules
 HELLO_MODULE_SRCS=examples/hello_module.js
 HELLO_MODULE_OPTS=-fno-string-normalize -fno-map -fno-promise -fno-typedarray \
-           -fno-typedarray -fno-regexp -fno-json -fno-eval -fno-proxy \
-           -fno-date -m
+	   -fno-typedarray -fno-regexp -fno-json -fno-eval -fno-proxy \
+	   -fno-date -m
 examples/hello_module: $(QJSC) libquickjs$(LTOEXT).a $(HELLO_MODULE_SRCS)
 	$(QJSC) $(HELLO_MODULE_OPTS) -o $@ $(HELLO_MODULE_SRCS)
 
@@ -403,10 +407,10 @@ examples/test_fib: $(OBJDIR)/test_fib.o $(OBJDIR)/examples/fib.o libquickjs$(LTO
 	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
 
 examples/fib.so: $(OBJDIR)/examples/fib.pic.o
-	$(CC) $(LDFLAGS) -shared -o $@ $^
+	$(CC) $(LDFLAGS) -shared -fPIC -o $@ $^
 
 examples/point.so: $(OBJDIR)/examples/point.pic.o
-	$(CC) $(LDFLAGS) -shared -o $@ $^
+	$(CC) $(LDFLAGS) -shared -fPIC -o $@ $^
 
 ###############################################################################
 # documentation
@@ -545,7 +549,7 @@ node-bench-v8:
 	node --jitless tests/bench-v8/combined.js
 
 tests/bjson.so: $(OBJDIR)/tests/bjson.pic.o
-	$(CC) $(LDFLAGS) -shared -o $@ $^ $(LIBS)
+	$(CC) $(LDFLAGS) -shared -fPIC -o $@ $^ $(LIBS)
 
 BENCHMARKDIR=../quickjs-benchmarks
 
