@@ -54,6 +54,10 @@ void js_std_promise_rejection_tracker(JSContext *ctx, JSValueConst promise,
 void js_std_set_worker_new_context_func(JSContext *(*func)(JSRuntime *rt));
 
 int js_std_eval_file(JSContext *ctx, const char *filename, int module);
+int js_std_eval_buf(JSContext *ctx, const void *buf, int buf_len,
+                    const char *filename, int eval_flags);
+
+int js_std_dump_record(char* filename);
 
 #ifdef __cplusplus
 } /* extern "C" { */

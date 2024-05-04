@@ -40,6 +40,7 @@
 #include <malloc_np.h>
 #endif
 
+#include <x86intrin.h>
 #include "cutils.h"
 #include "list.h"
 #include "quickjs.h"
@@ -89,7 +90,7 @@
   32: dump line number table
   64: dump compute_stack_size
  */
-//#define DUMP_BYTECODE  (1)
+/* #define DUMP_BYTECODE  (1) */
 /* dump the occurence of the automatic GC */
 //#define DUMP_GC
 /* dump objects freed by the garbage collector */
@@ -16132,6 +16133,30 @@ typedef enum {
 #define FUNC_RET_YIELD_STAR    2
 #define FUNC_RET_INITIAL_YIELD 3
 
+
+#define SAMPLES (32 * 100000)
+static uint32_t aux, cnt = 0, record_enable = 0;
+static uint64_t record[SAMPLES];
+
+void js_std_dump_record(char* filename){
+    // PROG (dump timestamp);
+    FILE* fp;
+    fp = fopen(filename, "wb");
+    if (fp == NULL) {
+        fprintf(stderr, "Error opening file %s\n", filename);
+        exit(1);
+    }
+    for (int i = 0; i < SAMPLES; ++i) {
+        if( record[i] == 0 ){
+            break;
+        }
+        fprintf(fp, "%lu\n", record[i]);
+    }
+    cnt = 0;
+    record_enable = 0;
+    fclose(fp);
+}
+
 /* argv[] is modified if (flags & JS_CALL_FLAG_COPY_ARGV) = 0. */
 static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                                JSValueConst this_obj, JSValueConst new_target,
@@ -16280,6 +16305,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             *sp++ = JS_NewInt32(ctx, opcode - OP_push_0);
             BREAK;
         CASE(OP_push_i8):
+            if( record_enable ) record[cnt++] = __rdtscp(&aux);
             *sp++ = JS_NewInt32(ctx, get_i8(pc));
             pc += 1;
             BREAK;
@@ -16565,6 +16591,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
         CASE(OP_call1):
         CASE(OP_call2):
         CASE(OP_call3):
+            record_enable = 1;
             call_argc = opcode - OP_call0;
             goto has_call_argc;
 #endif
@@ -16666,6 +16693,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             }
             BREAK;
         CASE(OP_return):
+            record_enable = 0;
             ret_val = *--sp;
             goto done;
         CASE(OP_return_undef):
@@ -17966,6 +17994,10 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             BREAK;
         CASE(OP_mul):
             {
+                /* uint64_t ts0; */
+                /* uint32_t aux; */
+                /* ts0 = __rdtscp(&aux); */
+                /* printf("OP_MUL: %lu\n", ts0); */
                 JSValue op1, op2;
                 double d;
                 op1 = sp[-2];
@@ -18029,6 +18061,10 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
         CASE(OP_math_mod):
 #endif
             {
+                /* uint64_t ts0; */
+                /* uint32_t aux; */
+                /* ts0 = __rdtscp(&aux); */
+                /* printf("OP_MOD: %lu\n", ts0); */
                 JSValue op1, op2;
                 op1 = sp[-2];
                 op2 = sp[-1];
@@ -18261,6 +18297,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             BREAK;
         CASE(OP_sar):
             {
+                if( record_enable ) record[cnt++] = __rdtscp(&aux);
                 JSValue op1, op2;
                 op1 = sp[-2];
                 op2 = sp[-1];

@@ -40,6 +40,7 @@
 #include <malloc_np.h>
 #endif
 
+#include <x86intrin.h>
 #include "cutils.h"
 #include "quickjs-libc.h"
 
@@ -69,6 +70,46 @@ static int eval_buf(JSContext *ctx, const void *buf, int buf_len,
         val = js_std_await(ctx, val);
     } else {
         val = JS_Eval(ctx, buf, buf_len, filename, eval_flags);
+    }
+    if (JS_IsException(val)) {
+        js_std_dump_error(ctx);
+        ret = -1;
+    } else {
+        ret = 0;
+    }
+    JS_FreeValue(ctx, val);
+    return ret;
+}
+
+int js_std_eval_buf(JSContext *ctx, const void *buf, int buf_len,
+                    const char *filename, int eval_flags)
+{
+    JSValue val;
+    int ret;
+    static int exec_cnt = 0, print_cnt = 10000;
+    static uint64_t exec_tsc = 0;
+    if ((eval_flags & JS_EVAL_TYPE_MASK) == JS_EVAL_TYPE_MODULE) {
+        /* for the modules, we compile then run to be able to set
+           import.meta */
+        val = JS_Eval(ctx, buf, buf_len, filename,
+                      eval_flags | JS_EVAL_FLAG_COMPILE_ONLY);
+        if (!JS_IsException(val)) {
+            js_module_set_import_meta(ctx, val, TRUE, TRUE);
+            val = JS_EvalFunction(ctx, val);
+        }
+        val = js_std_await(ctx, val);
+    } else {
+        uint64_t ts0, ts1;
+        uint32_t aux;
+        ts0 = __rdtscp(&aux);
+        val = JS_Eval(ctx, buf, buf_len, filename, eval_flags);
+        ts1 = __rdtscp(&aux);
+         exec_tsc += (ts1-ts0);
+         ++exec_cnt;
+         /* if( exec_cnt < 20 || exec_cnt % print_cnt == 0 ){ */
+         /*   printf("[LLC FR QJS]:[%04d] eval rdsctp: %lf %lu\n", exec_cnt, ((double)exec_tsc/(exec_cnt < 20 ? 1 : print_cnt)), (ts1-ts0)); */
+         /*   exec_tsc = 0; */
+         /* } */
     }
     if (JS_IsException(val)) {
         js_std_dump_error(ctx);
