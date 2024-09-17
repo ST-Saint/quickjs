@@ -57,7 +57,7 @@ int js_std_eval_file(JSContext *ctx, const char *filename, int module);
 int js_std_eval_buf(JSContext *ctx, const void *buf, int buf_len,
                     const char *filename, int eval_flags);
 
-int js_std_dump_record(char* filename);
+int js_std_dump_record(const char* filename);
 
 #ifdef __cplusplus
 } /* extern "C" { */

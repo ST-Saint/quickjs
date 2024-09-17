@@ -40,6 +40,9 @@
 #include <malloc_np.h>
 #endif
 
+#include <sched.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <x86intrin.h>
 #include "cutils.h"
 #include "list.h"
@@ -16134,8 +16137,53 @@ typedef enum {
 #define FUNC_RET_INITIAL_YIELD 3
 
 
+static uint32_t tsc_index = 0;
+static uint64_t tsc_record[1<<16][2];
+
 void js_std_dump_record(const char* filename){
     // PROG (dump timestamp);
+    FILE* fp;
+    fp = fopen(filename, "wb");
+    for(int i=0;i<tsc_index;++i){
+        fprintf(fp, "%lu:%lu\n", tsc_record[i][0], tsc_record[i][1]);
+    }
+    fclose(fp);
+}
+
+static void wrmsr_IBPB(uint32_t reg, const char* regvals) {
+    uint64_t data;
+    int fd;
+    char msr_file_name[64];
+    uint32_t cpu;
+    getcpu(&cpu, NULL);
+
+    sprintf(msr_file_name, "/dev/cpu/%d/msr", cpu);
+    fd = open(msr_file_name, O_WRONLY);
+    if (fd < 0) {
+           if (errno == ENXIO) {
+               printf("wrmsr: No CPU %d\n", cpu);
+           } else if (errno == EIO) {
+               printf("wrmsr: CPU %d doesn't support MSRs\n", cpu);
+           } else {
+               printf("wrmsr: open\n");
+           }
+    }
+
+    data = strtoull(regvals, NULL, 0);
+    if (pwrite(fd, &data, sizeof data, reg) != sizeof data) {
+        if (errno == EIO) {
+            printf(
+                "wrmsr: CPU %d cannot set MSR "
+                "0x%08x to 0x%016lx\n",
+                cpu, reg, data);
+        } else {
+            printf("wrmsr: pwrite\n");
+        }
+    }
+
+    close(fd);
+
+    return;
 }
 
 /* argv[] is modified if (flags & JS_CALL_FLAG_COPY_ARGV) = 0. */
@@ -17127,6 +17175,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                 sp[0] = JS_DupValue(ctx, var_buf[idx]);
                 sp++;
             }
+            wrmsr_IBPB(73, "0x1");
             BREAK;
         CASE(OP_get_loc_checkthis):
             {
@@ -17232,6 +17281,9 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                 goto exception;
             BREAK;
         CASE(OP_goto8):
+            uint32_t aux;
+            tsc_record[tsc_index][0] = __rdtscp(&aux);
+            tsc_record[tsc_index++][1] = OP_goto8;
             pc += (int8_t)pc[0];
             if (unlikely(js_poll_interrupts(ctx)))
                 goto exception;
@@ -17972,10 +18024,9 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             BREAK;
         CASE(OP_mul):
             {
-                /* uint64_t ts0; */
-                /* uint32_t aux; */
-                /* ts0 = __rdtscp(&aux); */
-                /* printf("OP_MUL: %lu\n", ts0); */
+                uint32_t aux;
+                tsc_record[tsc_index][0] = __rdtscp(&aux);
+                tsc_record[tsc_index++][1] = OP_mul;
                 JSValue op1, op2;
                 double d;
                 op1 = sp[-2];
@@ -18039,10 +18090,6 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
         CASE(OP_math_mod):
 #endif
             {
-                /* uint64_t ts0; */
-                /* uint32_t aux; */
-                /* ts0 = __rdtscp(&aux); */
-                /* printf("OP_MOD: %lu\n", ts0); */
                 JSValue op1, op2;
                 op1 = sp[-2];
                 op2 = sp[-1];
@@ -18275,6 +18322,9 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             BREAK;
         CASE(OP_sar):
             {
+                uint32_t aux;
+                tsc_record[tsc_index][0] = __rdtscp(&aux);
+                tsc_record[tsc_index++][1] = OP_sar;
                 JSValue op1, op2;
                 op1 = sp[-2];
                 op2 = sp[-1];
