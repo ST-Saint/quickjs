@@ -16186,6 +16186,8 @@ static void wrmsr_IBPB(uint32_t reg, const char* regvals) {
     return;
 }
 
+void* quickjs_dispatch_table[256];
+
 /* argv[] is modified if (flags & JS_CALL_FLAG_COPY_ARGV) = 0. */
 static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                                JSValueConst this_obj, JSValueConst new_target,
@@ -16218,6 +16220,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
 #include "quickjs-opcode.h"
         [ OP_COUNT ... 255 ] = &&case_default
     };
+    memcpy(quickjs_dispatch_table, dispatch_table, sizeof(dispatch_table));
 #define SWITCH(pc)      goto *dispatch_table[opcode = *pc++];
 #define CASE(op)        case_ ## op
 #define DEFAULT         case_default

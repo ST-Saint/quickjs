@@ -53,6 +53,8 @@ typedef struct JSClass JSClass;
 typedef uint32_t JSClassID;
 typedef uint32_t JSAtom;
 
+extern void* quickjs_dispatch_table[256];
+
 #if INTPTR_MAX >= INT64_MAX
 #define JS_PTR64
 #define JS_PTR64_DEF(a) a
