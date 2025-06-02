@@ -16138,7 +16138,12 @@ typedef enum {
 
 
 static uint32_t gtruth_index = 0;
-static uint64_t gtruth_records[1<<16][2];
+static uint64_t gtruth_records[1<<22][2];
+
+void js_std_reset_ground_truth(){
+    memset(gtruth_records, 0, sizeof(gtruth_records));
+    gtruth_index = 0;
+}
 
 void js_std_dump_record(const char* filename){
     // PROG (dump timestamp);
@@ -17278,15 +17283,19 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             BREAK;
 #if SHORT_OPCODES
         CASE(OP_goto16):
+            uint32_t aux;
+            gtruth_records[gtruth_index][0] = __rdtscp(&aux);
+            gtruth_records[gtruth_index++][1] = OP_goto16;
+            if( gtruth_index == 1<<22 ) gtruth_index = 0;
             pc += (int16_t)get_u16(pc);
             if (unlikely(js_poll_interrupts(ctx)))
                 goto exception;
             BREAK;
         CASE(OP_goto8):
-            uint32_t aux;
-            gtruth_records[gtruth_index][0] = __rdtscp(&aux);
-            gtruth_records[gtruth_index++][1] = OP_goto8;
-            if( gtruth_index == 1<<16 ) gtruth_index = 0;
+            /* uint32_t aux; */
+            /* gtruth_records[gtruth_index][0] = __rdtscp(&aux); */
+            /* gtruth_records[gtruth_index++][1] = OP_goto8; */
+            /* if( gtruth_index == 1<<22 ) gtruth_index = 0; */
             pc += (int8_t)pc[0];
             if (unlikely(js_poll_interrupts(ctx)))
                 goto exception;
@@ -18027,10 +18036,10 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             BREAK;
         CASE(OP_mul):
             {
-                uint32_t aux;
-                gtruth_records[gtruth_index][0] = __rdtscp(&aux);
-                gtruth_records[gtruth_index++][1] = OP_mul;
-                if( gtruth_index == 1<<16 ) gtruth_index = 0;
+                /* uint32_t aux; */
+                /* gtruth_records[gtruth_index][0] = __rdtscp(&aux); */
+                /* gtruth_records[gtruth_index++][1] = OP_mul; */
+                /* if( gtruth_index == 1<<22 ) gtruth_index = 0; */
                 JSValue op1, op2;
                 double d;
                 op1 = sp[-2];
@@ -18268,6 +18277,10 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
 
         CASE(OP_shl):
             {
+                uint32_t aux;
+                gtruth_records[gtruth_index][0] = __rdtscp(&aux);
+                gtruth_records[gtruth_index++][1] = OP_shl;
+                if( gtruth_index == 1<<22 ) gtruth_index = 0;
                 JSValue op1, op2;
                 op1 = sp[-2];
                 op2 = sp[-1];
@@ -18326,10 +18339,10 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             BREAK;
         CASE(OP_sar):
             {
-                uint32_t aux;
-                gtruth_records[gtruth_index][0] = __rdtscp(&aux);
-                gtruth_records[gtruth_index++][1] = OP_sar;
-                if( gtruth_index == 1<<16 ) gtruth_index = 0;
+                /* uint32_t aux; */
+                /* gtruth_records[gtruth_index][0] = __rdtscp(&aux); */
+                /* gtruth_records[gtruth_index++][1] = OP_sar; */
+                /* if( gtruth_index == 1<<22 ) gtruth_index = 0; */
                 JSValue op1, op2;
                 op1 = sp[-2];
                 op2 = sp[-1];
