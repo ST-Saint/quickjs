@@ -370,7 +370,7 @@ void lengauer(graph_t* g, graph_t* inv_g) {
         g->djs_val[u] = g->sdom[u];
         g->djs[u] = g->par[u];
 
-        printf("sdom %d: %d\n", g->nodes[u].pid, g->nodes[g->sdom[u]].pid);
+        /* printf("sdom %d: %d\n", g->nodes[u].pid, g->nodes[g->sdom[u]].pid); */
 
         insert_sdom_edge(g, g->sdom[u], u, 0);
         for (edge_t* edge = g->sdom_edges[g->par[u]]; edge != NULL; edge = edge->next) {
