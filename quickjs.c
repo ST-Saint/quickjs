@@ -22,12 +22,14 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <inttypes.h>
 #include <string.h>
 #include <assert.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <time.h>
 #include <fenv.h>
@@ -93,7 +95,7 @@
   32: dump line number table
   64: dump compute_stack_size
  */
-/* #define DUMP_BYTECODE  (1) */
+#define DUMP_BYTECODE  (1|16)
 /* dump the occurence of the automatic GC */
 //#define DUMP_GC
 /* dump objects freed by the garbage collector */
@@ -16193,6 +16195,33 @@ static void wrmsr_IBPB(uint32_t reg, const char* regvals) {
 
 void* quickjs_dispatch_table[256];
 
+#define TRACE_LOG_SIZE (1<<20)
+struct bc_trace_t {
+    const char* func_name;
+    uint32_t pc;
+    uint32_t opcode;
+    uint64_t tsc;
+};
+static struct bc_trace_t bc_trace[TRACE_LOG_SIZE];
+static uint32_t bc_trace_idx = 0;
+static uint32_t trace_enable = 0;
+
+void dump_bc_trace(){
+    /* dump bc trace */
+    /* printf("bc count: %d\n", bc_trace_idx); */
+
+    static FILE *fp = NULL;
+    if (fp == NULL) {
+        fp = fopen("bc_trace.out", "w");
+    }
+    for (uint32_t i = 0; i < bc_trace_idx; ++i) {
+        fprintf(fp, "%20s,%4d,%3d,%14lu\n", bc_trace[i].func_name, bc_trace[i].pc, bc_trace[i].opcode,
+                bc_trace[i].tsc);
+    }
+    fflush(fp);
+    bc_trace_idx = 0;
+}
+
 /* argv[] is modified if (flags & JS_CALL_FLAG_COPY_ARGV) = 0. */
 static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                                JSValueConst this_obj, JSValueConst new_target,
@@ -16208,6 +16237,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     JSValue *local_buf, *stack_buf, *var_buf, *arg_buf, *sp, ret_val, *pval;
     JSVarRef **var_refs;
     size_t alloca_size;
+    const char* func_name = NULL;
 
 #if !DIRECT_DISPATCH
 #define SWITCH(pc)      switch (opcode = *pc++)
@@ -16226,7 +16256,21 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
         [ OP_COUNT ... 255 ] = &&case_default
     };
     memcpy(quickjs_dispatch_table, dispatch_table, sizeof(dispatch_table));
-#define SWITCH(pc)      goto *dispatch_table[opcode = *pc++];
+    /* #define SWITCH(pc)      goto *dispatch_table[opcode = *pc++]; */
+    uint32_t aux;
+#define SWITCH(PC) {                                            \
+        opcode = *pc;                                           \
+        if(trace_enable){                                       \
+            bc_trace[bc_trace_idx] =                            \
+                (struct bc_trace_t){.func_name = func_name,     \
+                                    .pc=pc - b->byte_code_buf,  \
+                                    .opcode=opcode,             \
+                                    .tsc=__rdtscp(&aux)};       \
+            ++bc_trace_idx;                                     \
+        }                                                       \
+        ++pc;                                                   \
+        goto *dispatch_table[opcode];                           \
+    }
 #define CASE(op)        case_ ## op
 #define DEFAULT         case_default
 #define BREAK           SWITCH(pc)
@@ -16314,6 +16358,29 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     sf->prev_frame = rt->current_stack_frame;
     rt->current_stack_frame = sf;
     ctx = b->realm; /* set the current realm */
+
+    func_name = get_func_name(ctx, func_obj);
+
+    if( func_name != NULL ){
+        if( strcmp(func_name, "modExp") == 0 ){
+            printf("func %s starts\n", func_name);
+            trace_enable += 1;
+        }else if ( strcmp(func_name, "quantizeAndInverse") == 0 ){
+            printf("func %s starts\n", func_name);
+            trace_enable += 1;
+        }else if ( strcmp(func_name, "branch") == 0 ){
+            printf("func %s starts\n", func_name);
+            trace_enable += 1;
+        }
+        const char *dir_name = ".bytecode";
+        mkdir(dir_name, 0755);
+
+        char filename[256];
+        sprintf(filename, "%s/%s.bytecode", dir_name, func_name);
+        FILE *file = fopen(filename, "wb");
+        fwrite(b->byte_code_buf, sizeof(unsigned char), b->byte_code_len, file);
+        fclose(file);
+    }
 
  restart:
     for(;;) {
@@ -16639,6 +16706,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             has_call_argc:
                 call_argv = sp - call_argc;
                 sf->cur_pc = pc;
+                dump_bc_trace();
                 ret_val = JS_CallInternal(ctx, call_argv[-1], JS_UNDEFINED,
                                           JS_UNDEFINED, call_argc, call_argv, 0);
                 if (unlikely(JS_IsException(ret_val)))
@@ -17280,25 +17348,20 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             pc += (int32_t)get_u32(pc);
             if (unlikely(js_poll_interrupts(ctx)))
                 goto exception;
+            dump_bc_trace();
             BREAK;
 #if SHORT_OPCODES
         CASE(OP_goto16):
-            uint32_t aux;
-            gtruth_records[gtruth_index][0] = __rdtscp(&aux);
-            gtruth_records[gtruth_index++][1] = OP_goto16;
-            if( gtruth_index == 1<<22 ) gtruth_index = 0;
             pc += (int16_t)get_u16(pc);
             if (unlikely(js_poll_interrupts(ctx)))
                 goto exception;
+            dump_bc_trace();
             BREAK;
         CASE(OP_goto8):
-            /* uint32_t aux; */
-            /* gtruth_records[gtruth_index][0] = __rdtscp(&aux); */
-            /* gtruth_records[gtruth_index++][1] = OP_goto8; */
-            /* if( gtruth_index == 1<<22 ) gtruth_index = 0; */
             pc += (int8_t)pc[0];
             if (unlikely(js_poll_interrupts(ctx)))
                 goto exception;
+            dump_bc_trace();
             BREAK;
 #endif
         CASE(OP_if_true):
@@ -17320,6 +17383,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                 if (unlikely(js_poll_interrupts(ctx)))
                     goto exception;
             }
+            dump_bc_trace();
             BREAK;
         CASE(OP_if_false):
             {
@@ -17341,6 +17405,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                 if (unlikely(js_poll_interrupts(ctx)))
                     goto exception;
             }
+            dump_bc_trace();
             BREAK;
 #if SHORT_OPCODES
         CASE(OP_if_true8):
@@ -17362,6 +17427,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                 if (unlikely(js_poll_interrupts(ctx)))
                     goto exception;
             }
+            dump_bc_trace();
             BREAK;
         CASE(OP_if_false8):
             {
@@ -17382,6 +17448,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                 if (unlikely(js_poll_interrupts(ctx)))
                     goto exception;
             }
+            dump_bc_trace();
             BREAK;
 #endif
         CASE(OP_catch):
@@ -18036,10 +18103,6 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             BREAK;
         CASE(OP_mul):
             {
-                /* uint32_t aux; */
-                /* gtruth_records[gtruth_index][0] = __rdtscp(&aux); */
-                /* gtruth_records[gtruth_index++][1] = OP_mul; */
-                /* if( gtruth_index == 1<<22 ) gtruth_index = 0; */
                 JSValue op1, op2;
                 double d;
                 op1 = sp[-2];
@@ -18277,10 +18340,6 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
 
         CASE(OP_shl):
             {
-                uint32_t aux;
-                gtruth_records[gtruth_index][0] = __rdtscp(&aux);
-                gtruth_records[gtruth_index++][1] = OP_shl;
-                if( gtruth_index == 1<<22 ) gtruth_index = 0;
                 JSValue op1, op2;
                 op1 = sp[-2];
                 op2 = sp[-1];
@@ -18339,10 +18398,6 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             BREAK;
         CASE(OP_sar):
             {
-                /* uint32_t aux; */
-                /* gtruth_records[gtruth_index][0] = __rdtscp(&aux); */
-                /* gtruth_records[gtruth_index++][1] = OP_sar; */
-                /* if( gtruth_index == 1<<22 ) gtruth_index = 0; */
                 JSValue op1, op2;
                 op1 = sp[-2];
                 op2 = sp[-1];
@@ -18751,6 +18806,15 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
         sf->cur_sp = sp;
     } else {
     done:
+        if( func_name != NULL ){
+            if( strcmp(func_name, "modExp") == 0 ){
+                printf("func %s ends\n", func_name);
+                trace_enable -= 1;
+            }else if ( strcmp(func_name, "buildComponentData") == 0 ){
+                printf("func %s ends\n", func_name);
+                trace_enable -= 1;
+            }
+        }
         if (unlikely(!list_empty(&sf->var_ref_list))) {
             /* variable references reference the stack: must close them */
             close_var_refs(rt, sf);
@@ -18761,6 +18825,9 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
         }
     }
     rt->current_stack_frame = sf->prev_frame;
+
+    dump_bc_trace();
+
     return ret_val;
 }
 

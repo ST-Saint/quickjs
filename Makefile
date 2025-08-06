@@ -80,9 +80,9 @@ endif
 
 ifdef CONFIG_WIN32
   ifdef CONFIG_M32
-    CROSS_PREFIX?=i686-w64-mingw32-
+	CROSS_PREFIX?=i686-w64-mingw32-
   else
-    CROSS_PREFIX?=x86_64-w64-mingw32-
+	CROSS_PREFIX?=x86_64-w64-mingw32-
   endif
   EXE=.exe
 else
@@ -103,13 +103,13 @@ ifdef CONFIG_CLANG
   CFLAGS += -Wchar-subscripts -funsigned-char
   CFLAGS += -MMD -MF $(OBJDIR)/$(@F).d
   ifdef CONFIG_DEFAULT_AR
-    AR=$(CROSS_PREFIX)ar
+	AR=$(CROSS_PREFIX)ar
   else
-    ifdef CONFIG_LTO
-      AR=$(CROSS_PREFIX)llvm-ar
-    else
-      AR=$(CROSS_PREFIX)ar
-    endif
+	ifdef CONFIG_LTO
+	  AR=$(CROSS_PREFIX)llvm-ar
+	else
+	  AR=$(CROSS_PREFIX)ar
+	endif
   endif
 else ifdef CONFIG_COSMO
   CONFIG_LTO=
@@ -125,9 +125,9 @@ else
   CFLAGS+=-g -Wall -MMD -MF $(OBJDIR)/$(@F).d
   CFLAGS += -Wno-array-bounds -Wno-format-truncation
   ifdef CONFIG_LTO
-    AR=$(CROSS_PREFIX)gcc-ar
+	AR=$(CROSS_PREFIX)gcc-ar
   else
-    AR=$(CROSS_PREFIX)ar
+	AR=$(CROSS_PREFIX)ar
   endif
 endif
 STRIP?=$(CROSS_PREFIX)strip
@@ -225,9 +225,12 @@ all: $(OBJDIR) $(OBJDIR)/quickjs.check.o $(OBJDIR)/qjs.check.o $(PROGS) libquick
 
 QJS_LIB_OBJS=$(OBJDIR)/quickjs.o $(OBJDIR)/libregexp.o $(OBJDIR)/libunicode.o $(OBJDIR)/cutils.o $(OBJDIR)/quickjs-libc.o $(OBJDIR)/libbf.o
 
+QJS_SC_OBJS=$(OBJDIR)/qjs_sc.o $(QJS_LIB_OBJS)
+
 QJS_OBJS=$(OBJDIR)/qjs.o $(OBJDIR)/repl.o $(QJS_LIB_OBJS)
 ifdef CONFIG_BIGNUM
 QJS_OBJS+=$(OBJDIR)/qjscalc.o
+QJS_SC_OBJS+=$(OBJDIR)/qjscalc.o
 endif
 
 HOST_LIBS=-lm -ldl -lpthread
@@ -243,6 +246,9 @@ $(OBJDIR):
 qjs$(EXE): $(QJS_OBJS)
 	$(CC) $(LDFLAGS) $(LDEXPORT) -o $@ $^ $(LIBS)
 
+qjs_sc: $(QJS_SC_OBJS)
+	$(CC) $(LDFLAGS) $(LDEXPORT) -g -o $@ $^ $(LIBS)
+
 libquickjs.so: $(QJS_OBJS)
 	$(CC) $(LDFLAGS) -shared -fPIC -o $@ $^ $(LIBS)
 
@@ -255,7 +261,7 @@ qjsc$(EXE): $(OBJDIR)/qjsc.o $(QJS_LIB_OBJS)
 ifneq ($(CROSS_PREFIX),)
 
 $(QJSC): $(OBJDIR)/qjsc.host.o \
-    $(patsubst %.o, %.host.o, $(QJS_LIB_OBJS))
+	$(patsubst %.o, %.host.o, $(QJS_LIB_OBJS))
 	$(HOST_CC) $(LDFLAGS) -o $@ $^ $(HOST_LIBS)
 
 endif #CROSS_PREFIX
@@ -301,7 +307,7 @@ qjscalc.c: $(QJSC) qjscalc.js
 
 ifneq ($(wildcard unicode/UnicodeData.txt),)
 $(OBJDIR)/libunicode.o $(OBJDIR)/libunicode.m32.o $(OBJDIR)/libunicode.m32s.o \
-    $(OBJDIR)/libunicode.nolto.o: libunicode-table.h
+	$(OBJDIR)/libunicode.nolto.o: libunicode-table.h
 
 libunicode-table.h: unicode_gen
 	./unicode_gen unicode $@
