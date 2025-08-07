@@ -78,6 +78,8 @@ static const JSOpCode opcode_info[OP_COUNT + (OP_TEMP_END - OP_TEMP_START)] = {
 #undef FMT
 };
 
+#define OP_FINAL_COUNT (OP_COUNT + (OP_TEMP_END - OP_TEMP_START))
+
 typedef struct function_object_t {
     const char* func_name;
     uint8_t* bytecode_buf;
@@ -119,6 +121,7 @@ function_object_t* load_func_bytecode(const char* func) {
 
 typedef struct node_t {
     uint32_t pid;  // PC Offset
+    uint32_t op;   // OP ID
     const char* opstr;
 } node_t;
 
@@ -129,18 +132,43 @@ typedef struct edge_t {
     struct edge_t* next;
 } edge_t;
 
+typedef struct path_t {
+    uint32_t node;
+    edge_t* edge;
+    struct path_t* r_path;
+} path_t;
+
+typedef struct pathlist_t {
+    path_t* path;
+    struct pathlist_t* r_plist;
+} pathlist_t;
+
+typedef struct ts_instance_t {
+    uint32_t time;
+    struct ts_instance_t* next;
+} ts_instance_t;
+
+typedef struct ts_series_t {
+    ts_instance_t* series[OP_FINAL_COUNT];
+    ts_instance_t* series_tail[OP_FINAL_COUNT];
+} ts_series_t;
+
 #define MAX_NNODE (1 << 12)
+#define MAX_NEDGE (1 << 14)
 typedef struct graph_t {
     node_t nodes[MAX_NNODE];
     uint32_t pc_id[MAX_NNODE];
     uint32_t node_cnt;
 
-    edge_t* edges[MAX_NNODE];
-    edge_t edge_list[1 << 16];
+    uint32_t entry, exit;
+
+    edge_t* node_edges[MAX_NNODE];
+    edge_t edges[MAX_NEDGE];
     uint32_t edge_cnt;
 
+    // dominators
     edge_t* sdom_edges[MAX_NNODE];
-    edge_t sdom_edge_list[1 << 16];
+    edge_t sdom_edge_list[MAX_NEDGE];
     uint32_t sdom_edge_cnt;
 
     uint32_t dfn[MAX_NNODE];
@@ -151,7 +179,16 @@ typedef struct graph_t {
     int32_t djs_val[MAX_NNODE];
     uint32_t sdom[MAX_NNODE];
     uint32_t idom[MAX_NNODE];
-    uint32_t entry, exit;
+
+    // top-sort
+    uint32_t in_degree[MAX_NNODE];
+    uint32_t top_order[MAX_NNODE];
+    uint32_t top_idx;
+
+    // branching paths
+    pathlist_t* br_paths[MAX_NNODE];
+
+    struct graph_t* inv_g;
 } graph_t;
 
 graph_t g, inv_g;
@@ -160,10 +197,11 @@ void insert_sdom_edge(graph_t* g,
                       uint32_t src_id,
                       uint32_t sink_id,
                       uint32_t weight) {
-    g->sdom_edge_list[g->sdom_edge_cnt] = (edge_t){.src = src_id,
-                                              .sink = sink_id,
-                                              .weight = weight,
-                                              .next = g->sdom_edges[src_id]};
+    g->sdom_edge_list[g->sdom_edge_cnt] =
+        (edge_t){.src = src_id,
+                 .sink = sink_id,
+                 .weight = weight,
+                 .next = g->sdom_edges[src_id]};
     g->sdom_edges[src_id] = &g->sdom_edge_list[g->sdom_edge_cnt++];
 }
 
@@ -171,11 +209,11 @@ void insert_edge(graph_t* g,
                  uint32_t src_id,
                  uint32_t sink_id,
                  uint32_t weight) {
-    g->edge_list[g->edge_cnt] = (edge_t){.src = src_id,
-                                         .sink = sink_id,
-                                         .weight = weight,
-                                         .next = g->edges[src_id]};
-    g->edges[src_id] = &g->edge_list[g->edge_cnt++];
+    g->edges[g->edge_cnt] = (edge_t){.src = src_id,
+                                     .sink = sink_id,
+                                     .weight = weight,
+                                     .next = g->node_edges[src_id]};
+    g->node_edges[src_id] = &g->edges[g->edge_cnt++];
 }
 
 void init_graph(graph_t* g) {
@@ -188,11 +226,13 @@ void init_graph(graph_t* g) {
 void inverse_graph(graph_t* g, graph_t* inv_g) {
     init_graph(inv_g);
     memcpy(inv_g->nodes, g->nodes, sizeof(g->nodes));
+    g->inv_g = inv_g;
+    inv_g->inv_g = g;
     inv_g->node_cnt = g->node_cnt;
     inv_g->entry = g->exit;
     inv_g->exit = g->entry;
     for (int i = 0; i < g->edge_cnt; ++i) {
-        edge_t* edge = &g->edge_list[i];
+        edge_t* edge = &g->edges[i];
         insert_edge(inv_g, edge->sink, edge->src, edge->weight);
     }
 }
@@ -216,6 +256,7 @@ void parse_bytecodes(function_object_t* func_obj, uint32_t* exec_time) {
         }
         node = &g.nodes[g.pc_id[pid]];
         node->pid = pid;
+        node->op = *pc;
         node->opstr = opcode_info[*pc].name;
 
         switch (*pc) {
@@ -314,7 +355,7 @@ void dfs_graph(graph_t* g, uint32_t u) {
     g->dfn[u] = g->dfn_idx;
     g->dfn_node[g->dfn_idx] = u;
     ++g->dfn_idx;
-    for (edge_t* edge = g->edges[u]; edge != NULL; edge = edge->next) {
+    for (edge_t* edge = g->node_edges[u]; edge != NULL; edge = edge->next) {
         uint32_t v = edge->sink;
         if (g->dfn[v] == -1) {
             g->par[v] = u;
@@ -350,7 +391,8 @@ void lengauer(graph_t* g, graph_t* inv_g) {
     }
     for (int i = g->dfn_idx - 1; i > 0; --i) {
         uint32_t u = g->dfn_node[i];
-        for (edge_t* edge = inv_g->edges[u]; edge != NULL; edge = edge->next) {
+        for (edge_t* edge = inv_g->node_edges[u]; edge != NULL;
+             edge = edge->next) {
             uint32_t v = edge->sink;
 
             if (g->dfn[v] < g->dfn[u]) {
@@ -373,12 +415,13 @@ void lengauer(graph_t* g, graph_t* inv_g) {
         /* printf("sdom %d: %d\n", g->nodes[u].pid, g->nodes[g->sdom[u]].pid); */
 
         insert_sdom_edge(g, g->sdom[u], u, 0);
-        for (edge_t* edge = g->sdom_edges[g->par[u]]; edge != NULL; edge = edge->next) {
-            uint32_t v =edge->sink, djs_v=djs_find(g, v);
-            if( g->dfn[g->sdom[djs_v]] < g->dfn[g->sdom[v]]){
+        for (edge_t* edge = g->sdom_edges[g->par[u]]; edge != NULL;
+             edge = edge->next) {
+            uint32_t v = edge->sink, djs_v = djs_find(g, v);
+            if (g->dfn[g->sdom[djs_v]] < g->dfn[g->sdom[v]]) {
                 g->idom[v] = djs_v;
-            }else{
-                g->idom[v]=g->par[u];
+            } else {
+                g->idom[v] = g->par[u];
             }
             --g->sdom_edge_cnt;
         }
@@ -392,7 +435,223 @@ void lengauer(graph_t* g, graph_t* inv_g) {
             g->idom[u] = g->idom[g->idom[u]];
         }
 
-        printf("idom %d: %d\n", g->nodes[u].pid, g->nodes[g->idom[u]].pid);
+        /* printf("idom[%d]: %d\n", g->nodes[u].pid, g->nodes[g->idom[u]].pid); */
+    }
+}
+
+void top_sort_graph(graph_t* g) {
+    for (uint32_t i = 0; i < g->edge_cnt; ++i) {
+        edge_t* e = &g->edges[i];
+        ++g->in_degree[e->sink];
+    }
+
+    uint32_t queue[MAX_NNODE];
+    uint32_t front = 0, back = 0;
+
+    for (uint32_t u = 0; u < g->node_cnt; ++u) {
+        if (g->in_degree[u] == 0) {
+            queue[back++] = u;
+        }
+    }
+    g->top_idx = 0;
+    while (front < back) {
+        uint32_t u = queue[front++];
+        g->top_order[g->top_idx++] = u;
+
+        for (edge_t* e = g->node_edges[u]; e != NULL; e = e->next) {
+            uint32_t v = e->sink;
+            if (--g->in_degree[v] == 0) {
+                queue[back++] = v;
+            }
+        }
+    }
+
+    /* for (int i = 0; i < g->top_idx; ++i) { */
+    /*     printf("top[%d]: %d\n", i, g->nodes[i].pid); */
+    /* } */
+    if (g->top_idx < g->node_cnt) {
+        printf("Error: Graph has cycles.\n");
+        exit(1);
+    }
+}
+
+ts_series_t* parse_cf_path(graph_t* g, path_t* path) {
+    ts_series_t* ts_seris = malloc(sizeof(ts_series_t));
+    ts_instance_t* ts_inst;
+    uint32_t dist = 0;
+    uint32_t u = 0;
+    edge_t* e = NULL;
+
+    memset(ts_seris, 0, sizeof(ts_series_t));
+
+    for (; path != NULL; path = path->r_path) {
+        u = path->node;
+        e = path->edge;
+
+        ts_inst = malloc(sizeof(ts_instance_t));
+        ts_inst->time = dist;
+        ts_inst->next = NULL;
+
+        if (!ts_seris->series[g->nodes[u].op]) {
+            ts_seris->series[g->nodes[u].op] = ts_inst;
+        } else {
+            ts_seris->series_tail[g->nodes[u].op]->next = ts_inst;
+        }
+        ts_seris->series_tail[g->nodes[u].op] = ts_inst;
+        if (e) {
+            dist += e->weight;
+        }
+    }
+    return ts_seris;
+}
+
+#define TIME_WINDOW (10000)
+int8_t compare_ts_series(ts_instance_t* ts_a, ts_instance_t* ts_b) {
+    if (ts_a == NULL && ts_b == NULL) {
+        return 0;
+    } else if (ts_a == NULL) {
+        return 1;
+    } else if (ts_b == NULL) {
+        return 1;
+    }
+    uint32_t f[MAX_NNODE] = {}, time[MAX_NNODE] = {};
+    uint8_t ts_c[MAX_NNODE] = {};
+    uint32_t f_cnt = 0;
+    f[0] = f_cnt = 1;
+    time[0] = 0;
+    ts_instance_t* proc = NULL;
+    uint32_t idx = 0;
+    while (ts_a != NULL || ts_b != NULL) {
+        ++idx;
+        if (ts_a == NULL) {
+            proc = ts_b;
+            ts_c[idx] = 2;
+            ts_b = ts_b->next;
+        } else if (ts_b == NULL) {
+            proc = ts_a;
+            ts_c[idx] = 1;
+            ts_a = ts_a->next;
+        } else {
+            if (ts_a->time < ts_b->time) {
+                proc = ts_a;
+                ts_c[idx] = 1;
+                ts_a = ts_a->next;
+            } else {
+                proc = ts_b;
+                ts_c[idx] = 2;
+                ts_b = ts_b->next;
+            }
+        }
+        time[idx] = proc->time;
+        uint32_t c_a = ts_c[idx] == 1, c_b = ts_c[idx] == 2;
+        // TODO: optimization
+        for (int i = idx - 1; i >= 0 && f[idx] == 0; --i) {
+            if (i != 0 && time[idx] - time[i] > TIME_WINDOW) {
+                break;
+            }
+            if (ts_c[i] == 1) {
+                ++c_a;
+            } else if (ts_c[i] == 2) {
+                ++c_b;
+            }
+            if (c_a && c_b) {
+                f[idx] += f[i];
+            }
+        }
+    }
+    return f[idx] == 0;
+}
+
+uint8_t* compare_paths(graph_t* g, path_t* pa, path_t* pb) {
+    ts_series_t* ts_a = parse_cf_path(g, pa);
+    ts_series_t* ts_b = parse_cf_path(g, pb);
+
+    /* for (int i = 0; i < OP_FINAL_COUNT; ++i) { */
+    /*     if (ts_a->series[i] != NULL) { */
+    /*         printf("OP[%s]: ", opcode_info[i].name); */
+    /*         for (ts_instance_t* ts_inst = ts_a->series[i]; ts_inst != NULL; */
+    /*              ts_inst = ts_inst->next) { */
+    /*             printf("%d -> ", ts_inst->time); */
+    /*         } */
+    /*         printf("\n"); */
+    /*     } */
+    /* } */
+    uint8_t* diff_set = malloc(sizeof(uint8_t) * OP_FINAL_COUNT);
+    for (int i = 0; i < OP_FINAL_COUNT; ++i) {
+        diff_set[i] = compare_ts_series(ts_a->series[i], ts_b->series[i]);
+        if (diff_set[i])
+            printf("%d:%s differ\n", i, opcode_info[i].name);
+    }
+    return diff_set;
+}
+
+pathlist_t* branching_subgraph_paths(graph_t* g, uint32_t u, uint32_t sink) {
+    if (g->br_paths[u] != NULL) {
+        return g->br_paths[u];
+    }
+
+    pathlist_t* u_plist = NULL;
+    path_t *u_path = NULL, *v_path = NULL;
+    if (u == sink) {
+        u_path = malloc(sizeof(path_t));
+        *u_path = (path_t){.node = u, .edge = NULL, .r_path = NULL};
+
+        u_plist = malloc(sizeof(pathlist_t));
+        *u_plist = (pathlist_t){.path = u_path, .r_plist = g->br_paths[u]};
+        g->br_paths[u] = u_plist;
+
+        return g->br_paths[u];
+    }
+
+    for (edge_t* e = g->node_edges[u]; e != NULL; e = e->next) {
+        pathlist_t* v_plist = branching_subgraph_paths(g, e->sink, sink);
+
+        while (v_plist != NULL) {
+            v_path = v_plist->path;
+
+            u_path = malloc(sizeof(path_t));
+            *u_path = (path_t){.node = u, .edge = e, .r_path = v_path};
+
+            u_plist = malloc(sizeof(pathlist_t));
+            *u_plist = (pathlist_t){.path = u_path, .r_plist = g->br_paths[u]};
+            g->br_paths[u] = u_plist;
+
+            v_plist = v_plist->r_plist;
+        }
+    }
+    return g->br_paths[u];
+}
+
+void print_path(graph_t* g, path_t* path) {
+    uint32_t u = path->edge->src, dist = 0;
+    printf("Path: src=");
+    for (; path != NULL; path = path->r_path) {
+        u = path->node;
+        printf("[%d:%s](%d)%s", g->nodes[u].pid, g->nodes[u].opstr, dist,
+               path->edge == NULL ? "" : "->");
+        dist += path->edge ? path->edge->weight : 0;
+    }
+    printf("=sink;\n");
+}
+
+void analyze_branching_subgraph(graph_t* g) {
+    top_sort_graph(g);
+    for (int i = g->top_idx - 1; i >= 0; --i) {
+        const char* opstr = g->nodes[g->top_order[i]].opstr;
+        if (strncmp(opstr, "if_", strlen("if_")) == 0) {
+            uint32_t u = g->top_order[i];
+            pathlist_t* plist =
+                branching_subgraph_paths(g, u, g->inv_g->idom[u]);
+            for (pathlist_t* p = plist; p != NULL; p = p->r_plist) {
+                print_path(g, p->path);
+            }
+            for (pathlist_t* p1 = plist; p1 != NULL; p1 = p1->r_plist) {
+                for (pathlist_t* p2 = p1->r_plist; p2 != NULL;
+                     p2 = p2->r_plist) {
+                    compare_paths(g, p1->path, p2->path);
+                }
+            }
+        }
     }
 }
 
@@ -407,6 +666,7 @@ void sc_analyze(const char* func_name, const char* profile_file) {
     }
     parse_bytecodes(func_obj, exec_time);
     lengauer(&inv_g, &g);
+    analyze_branching_subgraph(&g);
 }
 
 int main(int argc, char** argv) {
