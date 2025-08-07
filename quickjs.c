@@ -16222,6 +16222,12 @@ void dump_bc_trace(){
     bc_trace_idx = 0;
 }
 
+const char *trace_funcs[] = {
+    "modExp",
+    "buildComponentData",
+    "branch",
+};
+
 /* argv[] is modified if (flags & JS_CALL_FLAG_COPY_ARGV) = 0. */
 static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                                JSValueConst this_obj, JSValueConst new_target,
@@ -16362,15 +16368,15 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     func_name = get_func_name(ctx, func_obj);
 
     if( func_name != NULL ){
-        if( strcmp(func_name, "modExp") == 0 ){
-            printf("func %s starts\n", func_name);
-            trace_enable += 1;
-        }else if ( strcmp(func_name, "quantizeAndInverse") == 0 ){
-            printf("func %s starts\n", func_name);
-            trace_enable += 1;
-        }else if ( strcmp(func_name, "branch") == 0 ){
-            printf("func %s starts\n", func_name);
-            trace_enable += 1;
+
+        for (int i = 0; i < sizeof(trace_funcs)/sizeof(trace_funcs[0]); i++) {
+            if (strcmp(func_name, trace_funcs[i]) == 0) {
+                if (strcmp(func_name, "branch") == 0) {
+                    printf("func %s starts\n", func_name);
+                    trace_enable += 1;
+                }
+                break;
+            }
         }
         const char *dir_name = ".bytecode";
         mkdir(dir_name, 0755);
@@ -18806,13 +18812,15 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
         sf->cur_sp = sp;
     } else {
     done:
-        if( func_name != NULL ){
-            if( strcmp(func_name, "modExp") == 0 ){
-                printf("func %s ends\n", func_name);
-                trace_enable -= 1;
-            }else if ( strcmp(func_name, "buildComponentData") == 0 ){
-                printf("func %s ends\n", func_name);
-                trace_enable -= 1;
+        if( func_name!=NULL){
+            for (int i = 0; i < sizeof(trace_funcs)/sizeof(trace_funcs[0]); i++) {
+                if (strcmp(func_name, trace_funcs[i]) == 0) {
+                    if (strcmp(func_name, "branch") == 0) {
+                        printf("func %s starts\n", func_name);
+                        trace_enable -= 1;
+                    }
+                    break;
+                }
             }
         }
         if (unlikely(!list_empty(&sf->var_ref_list))) {

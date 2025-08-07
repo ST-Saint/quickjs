@@ -86,6 +86,8 @@ typedef struct function_object_t {
     uint32_t bytecode_len;
 } function_object_t;
 
+int exec_time_given = 0;
+
 function_object_t* load_func_bytecode(const char* func) {
     char filepath[256];
     FILE* file = NULL;
@@ -211,7 +213,8 @@ void dump_graph_to_json(graph_t* g, const char* filename) {
     fprintf(f, "{\n  \"nodes\": [\n");
     for (uint32_t i = 0; i < g->node_cnt; ++i) {
         fprintf(f, "    {\"id\": \"%u\", \"label\": \"%d:%s\"}%s\n", i,
-                g->nodes[i].pid, g->nodes[i].opstr, (i == g->node_cnt - 1) ? "" : ",");
+                g->nodes[i].pid, g->nodes[i].opstr,
+                (i == g->node_cnt - 1) ? "" : ",");
     }
     fprintf(f, "  ],\n  \"links\": [\n");
 
@@ -220,8 +223,9 @@ void dump_graph_to_json(graph_t* g, const char* filename) {
         edge_t* e = &g->edges[i];
         if (!first)
             fprintf(f, ",\n");
-        fprintf(f, "    {\"source\": \"%u\", \"target\": \"%u\"}", e->src,
-                e->sink);
+        fprintf(f,
+                "    {\"source\": \"%u\", \"target\": \"%u\", \"label\": %d}",
+                e->src, e->sink, e->weight);
         first = 0;
     }
 
@@ -277,7 +281,7 @@ void parse_bytecodes(function_object_t* func_obj, uint32_t* exec_time) {
     uint8_t* base = func_obj->bytecode_buf;
     uint8_t *pc = func_obj->bytecode_buf, *next_pc;
     uint32_t inst_cnt = 0;
-    int8_t jump_offset;
+    int32_t jump_offset;
     uint32_t pid;
     node_t* node;
     uint32_t sink;
@@ -294,20 +298,26 @@ void parse_bytecodes(function_object_t* func_obj, uint32_t* exec_time) {
         node->pid = pid;
         node->op = *pc;
         node->opstr = opcode_info[*pc].name;
-        if (exec_time[pid] == 0) {
+
+        if (exec_time_given && exec_time[pid] == 0) {
             printf("Warn: Execution time of [%d:%s] is unknown\n", pid,
                    opcode_info[*pc].name);
         }
         switch (*pc) {
-            case OP_if_false:
-            case OP_if_true:
             case OP_goto:
             case OP_goto16:
-                printf("WARN: not implemented");
-                assert(0);
-                break;
             case OP_goto8:
-                jump_offset = *(pc + 1);
+                switch (*pc) {
+                    case OP_goto:
+                        jump_offset = (int32_t)*(pc + 1);
+                        break;
+                    case OP_goto16:
+                        jump_offset = (int16_t)*(pc + 1);
+                        break;
+                    case OP_goto8:
+                        jump_offset = (int8_t)*(pc + 1);
+                        break;
+                }
                 printf("[%04u:%02X]: %s offset: %d, target %u\n", pid, *pc,
                        opcode_info[*pc].name, jump_offset,
                        pid + jump_offset + 1);
@@ -319,9 +329,30 @@ void parse_bytecodes(function_object_t* func_obj, uint32_t* exec_time) {
                 insert_edge(&g, g.pc_id[pid], g.pc_id[sink], exec_time[pid]);
                 next_pc = pc + opcode_info[*pc].size;
                 break;
+            case OP_if_false:
+            case OP_if_true:
+                jump_offset = (int32_t)*(pc + 1);
+                printf("[%04u:%02X]: %s offset: %d, target %u\n", pid, *pc,
+                       opcode_info[*pc].name, jump_offset,
+                       pid + jump_offset + 1);
+
+                sink = pid + opcode_info[*pc].size;
+                if (g.pc_id[sink] == -1) {
+                    g.pc_id[sink] = g.node_cnt++;
+                }
+                insert_edge(&g, g.pc_id[pid], g.pc_id[sink], exec_time[pid]);
+
+                sink = pid + jump_offset + 1;
+                if (g.pc_id[sink] == -1) {
+                    g.pc_id[sink] = g.node_cnt++;
+                }
+                insert_edge(&g, g.pc_id[pid], g.pc_id[sink], exec_time[pid]);
+
+                next_pc = pc + opcode_info[*pc].size;
+                break;
             case OP_if_true8:
             case OP_if_false8:
-                jump_offset = *(pc + 1);
+                jump_offset = (int8_t)*(pc + 1);
                 printf("[%04u:%02X]: %s offset: %d, target %u\n", pid, *pc,
                        opcode_info[*pc].name, jump_offset,
                        pid + jump_offset + 1);
@@ -746,8 +777,10 @@ void sc_analyze(const char* filename, const char* profile_file) {
     function_object_t* func_obj = load_func_bytecode(filename);
     uint32_t* exec_time = NULL;
     if (profile_file) {
+        exec_time_given = 1;
         exec_time = load_exec_time(func_obj, profile_file);
     } else {
+        printf("Warn: Execution time is unknown\n");
         exec_time = malloc(sizeof(uint32_t) * func_obj->bytecode_len);
         memset(exec_time, 0, sizeof(uint32_t) * func_obj->bytecode_len);
     }
