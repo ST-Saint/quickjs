@@ -247,7 +247,7 @@ qjs$(EXE): $(QJS_OBJS)
 	$(CC) $(LDFLAGS) $(LDEXPORT) -o $@ $^ $(LIBS)
 
 qjs_sc: $(QJS_SC_OBJS)
-	$(CC) $(LDFLAGS) $(LDEXPORT) -g -o $@ $^ $(LIBS)
+	$(CC) $(LDFLAGS) $(LDEXPORT) -o $@ $^ $(LIBS)
 
 libquickjs.so: $(QJS_OBJS)
 	$(CC) $(LDFLAGS) -shared -fPIC -o $@ $^ $(LIBS)

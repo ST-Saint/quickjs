@@ -144,7 +144,7 @@ typedef struct pathlist_t {
 } pathlist_t;
 
 typedef struct ts_instance_t {
-    uint32_t time;
+    int32_t time;
     struct ts_instance_t* next;
 } ts_instance_t;
 
@@ -188,10 +188,46 @@ typedef struct graph_t {
     // branching paths
     pathlist_t* br_paths[MAX_NNODE];
 
+    uint32_t OP_dist[MAX_NNODE][OP_FINAL_COUNT];
     struct graph_t* inv_g;
 } graph_t;
 
 graph_t g, inv_g;
+
+void dump_graph_to_json(graph_t* g, const char* filename) {
+    char filepath[256];
+    const char* dot = strrchr(filename, '.');
+
+    size_t len = dot - filename;
+    printf("%.*s\n", (int)len, filename);
+    sprintf(filepath, "%.*s.json", (int)len, filename);
+    printf("write to %s\n", filepath);
+    FILE* f = fopen(filepath, "w");
+    if (!f) {
+        perror("fopen");
+        return;
+    }
+
+    fprintf(f, "{\n  \"nodes\": [\n");
+    for (uint32_t i = 0; i < g->node_cnt; ++i) {
+        fprintf(f, "    {\"id\": \"%u\", \"label\": \"%d:%s\"}%s\n", i,
+                g->nodes[i].pid, g->nodes[i].opstr, (i == g->node_cnt - 1) ? "" : ",");
+    }
+    fprintf(f, "  ],\n  \"links\": [\n");
+
+    int first = 1;
+    for (int i = 0; i < g->edge_cnt; ++i) {
+        edge_t* e = &g->edges[i];
+        if (!first)
+            fprintf(f, ",\n");
+        fprintf(f, "    {\"source\": \"%u\", \"target\": \"%u\"}", e->src,
+                e->sink);
+        first = 0;
+    }
+
+    fprintf(f, "\n  ]\n}\n");
+    fclose(f);
+}
 
 void insert_sdom_edge(graph_t* g,
                       uint32_t src_id,
@@ -258,7 +294,10 @@ void parse_bytecodes(function_object_t* func_obj, uint32_t* exec_time) {
         node->pid = pid;
         node->op = *pc;
         node->opstr = opcode_info[*pc].name;
-
+        if (exec_time[pid] == 0) {
+            printf("Warn: Execution time of [%d:%s] is unknown\n", pid,
+                   opcode_info[*pc].name);
+        }
         switch (*pc) {
             case OP_if_false:
             case OP_if_true:
@@ -324,6 +363,8 @@ void parse_bytecodes(function_object_t* func_obj, uint32_t* exec_time) {
     g.exit = g.pc_id[pid];
     printf("Total instructions: %d\n", inst_cnt);
     inverse_graph(&g, &inv_g);
+
+    dump_graph_to_json(&g, func_obj->func_name);
     return;
 }
 
@@ -439,14 +480,15 @@ void lengauer(graph_t* g, graph_t* inv_g) {
     }
 }
 
-void top_sort_graph(graph_t* g) {
+void top_sort_graph_with_OP_distance(graph_t* g) {
+    uint32_t queue[MAX_NNODE];
+    uint32_t front = 0, back = 0;
+
+    memset(g->OP_dist, 0xff, sizeof(g->OP_dist));
     for (uint32_t i = 0; i < g->edge_cnt; ++i) {
         edge_t* e = &g->edges[i];
         ++g->in_degree[e->sink];
     }
-
-    uint32_t queue[MAX_NNODE];
-    uint32_t front = 0, back = 0;
 
     for (uint32_t u = 0; u < g->node_cnt; ++u) {
         if (g->in_degree[u] == 0) {
@@ -455,19 +497,32 @@ void top_sort_graph(graph_t* g) {
     }
     g->top_idx = 0;
     while (front < back) {
-        uint32_t u = queue[front++];
+        uint32_t u = queue[front++], op = g->nodes[u].op;
         g->top_order[g->top_idx++] = u;
-
+        g->OP_dist[u][op] = 0;
         for (edge_t* e = g->node_edges[u]; e != NULL; e = e->next) {
             uint32_t v = e->sink;
             if (--g->in_degree[v] == 0) {
                 queue[back++] = v;
+            }
+
+            for (int j = 1; j < OP_FINAL_COUNT; ++j) {
+                if (g->OP_dist[u][j] != UINT32_MAX &&
+                    g->OP_dist[v][j] > g->OP_dist[u][j] + e->weight) {
+                    g->OP_dist[v][j] = g->OP_dist[u][j] + e->weight;
+                }
             }
         }
     }
 
     /* for (int i = 0; i < g->top_idx; ++i) { */
     /*     printf("top[%d]: %d\n", i, g->nodes[i].pid); */
+    /*     for (int j = 1; j < OP_FINAL_COUNT; ++j) { */
+    /*         if (g->OP_dist[i][j] != UINT32_MAX) { */
+    /*             printf("node [%d:%s]--[%d:%s] dist: %d\n", i, g->nodes[i].opstr, */
+    /*                    j, opcode_info[j].name, g->OP_dist[i][j]); */
+    /*         } */
+    /*     } */
     /* } */
     if (g->top_idx < g->node_cnt) {
         printf("Error: Graph has cycles.\n");
@@ -482,8 +537,18 @@ ts_series_t* parse_cf_path(graph_t* g, path_t* path) {
     uint32_t u = 0;
     edge_t* e = NULL;
 
-    memset(ts_seris, 0, sizeof(ts_series_t));
+    u = path->node;
 
+    memset(ts_seris, 0, sizeof(ts_series_t));
+    for (int i = 1; i < OP_FINAL_COUNT; ++i) {
+        if (g->OP_dist[u][i] != UINT32_MAX) {
+            ts_inst = malloc(sizeof(ts_instance_t));
+            ts_inst->time = -g->OP_dist[u][i];
+            ts_inst->next = NULL;
+            ts_seris->series[i] = ts_inst;
+            ts_seris->series_tail[i] = ts_inst;
+        }
+    }
     for (; path != NULL; path = path->r_path) {
         u = path->node;
         e = path->edge;
@@ -502,11 +567,28 @@ ts_series_t* parse_cf_path(graph_t* g, path_t* path) {
             dist += e->weight;
         }
     }
+    for (int i = 1; i < OP_FINAL_COUNT; ++i) {
+        if (g->inv_g->OP_dist[u][i] != UINT32_MAX) {
+            dist += g->inv_g->OP_dist[u][i];
+            ts_inst = malloc(sizeof(ts_instance_t));
+            ts_inst->time = dist;
+            ts_inst->next = NULL;
+
+            if (!ts_seris->series[i]) {
+                ts_seris->series[i] = ts_inst;
+            } else {
+                ts_seris->series_tail[i]->next = ts_inst;
+            }
+            ts_seris->series_tail[i] = ts_inst;
+        }
+    }
     return ts_seris;
 }
 
 #define TIME_WINDOW (10000)
-int8_t compare_ts_series(ts_instance_t* ts_a, ts_instance_t* ts_b) {
+int8_t compare_ts_series(volatile uint32_t op,
+                         ts_instance_t* ts_a,
+                         ts_instance_t* ts_b) {
     if (ts_a == NULL && ts_b == NULL) {
         return 0;
     } else if (ts_a == NULL) {
@@ -514,7 +596,8 @@ int8_t compare_ts_series(ts_instance_t* ts_a, ts_instance_t* ts_b) {
     } else if (ts_b == NULL) {
         return 1;
     }
-    uint32_t f[MAX_NNODE] = {}, time[MAX_NNODE] = {};
+    uint32_t f[MAX_NNODE] = {};
+    int32_t time[MAX_NNODE] = {};
     uint8_t ts_c[MAX_NNODE] = {};
     uint32_t f_cnt = 0;
     f[0] = f_cnt = 1;
@@ -543,9 +626,9 @@ int8_t compare_ts_series(ts_instance_t* ts_a, ts_instance_t* ts_b) {
             }
         }
         time[idx] = proc->time;
-        uint32_t c_a = ts_c[idx] == 1, c_b = ts_c[idx] == 2;
+        uint32_t c_a = 0, c_b = 0;
         // TODO: optimization
-        for (int i = idx - 1; i >= 0 && f[idx] == 0; --i) {
+        for (int i = idx; i > 0 && f[idx] == 0; --i) {
             if (i != 0 && time[idx] - time[i] > TIME_WINDOW) {
                 break;
             }
@@ -555,7 +638,7 @@ int8_t compare_ts_series(ts_instance_t* ts_a, ts_instance_t* ts_b) {
                 ++c_b;
             }
             if (c_a && c_b) {
-                f[idx] += f[i];
+                f[idx] += f[i - 1];
             }
         }
     }
@@ -566,7 +649,7 @@ uint8_t* compare_paths(graph_t* g, path_t* pa, path_t* pb) {
     ts_series_t* ts_a = parse_cf_path(g, pa);
     ts_series_t* ts_b = parse_cf_path(g, pb);
 
-    /* for (int i = 0; i < OP_FINAL_COUNT; ++i) { */
+    /* for (int i = 1; i < OP_FINAL_COUNT; ++i) { */
     /*     if (ts_a->series[i] != NULL) { */
     /*         printf("OP[%s]: ", opcode_info[i].name); */
     /*         for (ts_instance_t* ts_inst = ts_a->series[i]; ts_inst != NULL; */
@@ -577,11 +660,12 @@ uint8_t* compare_paths(graph_t* g, path_t* pa, path_t* pb) {
     /*     } */
     /* } */
     uint8_t* diff_set = malloc(sizeof(uint8_t) * OP_FINAL_COUNT);
-    for (int i = 0; i < OP_FINAL_COUNT; ++i) {
-        diff_set[i] = compare_ts_series(ts_a->series[i], ts_b->series[i]);
+    for (int i = 1; i < OP_FINAL_COUNT; ++i) {
+        diff_set[i] = compare_ts_series(i, ts_a->series[i], ts_b->series[i]);
         if (diff_set[i])
             printf("%d:%s differ\n", i, opcode_info[i].name);
     }
+    // TODO free ts_series
     return diff_set;
 }
 
@@ -635,7 +719,9 @@ void print_path(graph_t* g, path_t* path) {
 }
 
 void analyze_branching_subgraph(graph_t* g) {
-    top_sort_graph(g);
+    top_sort_graph_with_OP_distance(g);
+    top_sort_graph_with_OP_distance(g->inv_g);
+
     for (int i = g->top_idx - 1; i >= 0; --i) {
         const char* opstr = g->nodes[g->top_order[i]].opstr;
         if (strncmp(opstr, "if_", strlen("if_")) == 0) {
@@ -649,14 +735,15 @@ void analyze_branching_subgraph(graph_t* g) {
                 for (pathlist_t* p2 = p1->r_plist; p2 != NULL;
                      p2 = p2->r_plist) {
                     compare_paths(g, p1->path, p2->path);
+                    printf("\n");
                 }
             }
         }
     }
 }
 
-void sc_analyze(const char* func_name, const char* profile_file) {
-    function_object_t* func_obj = load_func_bytecode(func_name);
+void sc_analyze(const char* filename, const char* profile_file) {
+    function_object_t* func_obj = load_func_bytecode(filename);
     uint32_t* exec_time = NULL;
     if (profile_file) {
         exec_time = load_exec_time(func_obj, profile_file);
