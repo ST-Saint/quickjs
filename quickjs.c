@@ -16222,10 +16222,12 @@ void dump_bc_trace(){
     bc_trace_idx = 0;
 }
 
-const char *trace_funcs[] = {
+const char *trace_func_names[] = {
     "modExp",
     "buildComponentData",
+    "quantizeAndInverse",
     "branch",
+    "loop",
 };
 
 /* argv[] is modified if (flags & JS_CALL_FLAG_COPY_ARGV) = 0. */
@@ -16369,12 +16371,10 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
 
     if( func_name != NULL ){
 
-        for (int i = 0; i < sizeof(trace_funcs)/sizeof(trace_funcs[0]); i++) {
-            if (strcmp(func_name, trace_funcs[i]) == 0) {
-                if (strcmp(func_name, "branch") == 0) {
-                    printf("func %s starts\n", func_name);
-                    trace_enable += 1;
-                }
+        for (int i = 0; i < sizeof(trace_func_names)/sizeof(trace_func_names[0]); i++) {
+            if (strcmp(func_name, trace_func_names[i]) == 0) {
+                printf("func %s starts\n", func_name);
+                trace_enable += 1;
                 break;
             }
         }
@@ -18813,12 +18813,10 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     } else {
     done:
         if( func_name!=NULL){
-            for (int i = 0; i < sizeof(trace_funcs)/sizeof(trace_funcs[0]); i++) {
-                if (strcmp(func_name, trace_funcs[i]) == 0) {
-                    if (strcmp(func_name, "branch") == 0) {
-                        printf("func %s starts\n", func_name);
-                        trace_enable -= 1;
-                    }
+            for (int i = 0; i < sizeof(trace_func_names)/sizeof(trace_func_names[0]); i++) {
+                if (strcmp(func_name, trace_func_names[i]) == 0) {
+                    printf("func %s starts\n", func_name);
+                    trace_enable -= 1;
                     break;
                 }
             }
