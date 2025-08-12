@@ -225,12 +225,9 @@ all: $(OBJDIR) $(OBJDIR)/quickjs.check.o $(OBJDIR)/qjs.check.o $(PROGS) libquick
 
 QJS_LIB_OBJS=$(OBJDIR)/quickjs.o $(OBJDIR)/libregexp.o $(OBJDIR)/libunicode.o $(OBJDIR)/cutils.o $(OBJDIR)/quickjs-libc.o $(OBJDIR)/libbf.o
 
-QJS_SC_OBJS=$(OBJDIR)/qjs_sc.o $(QJS_LIB_OBJS)
-
 QJS_OBJS=$(OBJDIR)/qjs.o $(OBJDIR)/repl.o $(QJS_LIB_OBJS)
 ifdef CONFIG_BIGNUM
 QJS_OBJS+=$(OBJDIR)/qjscalc.o
-QJS_SC_OBJS+=$(OBJDIR)/qjscalc.o
 endif
 
 HOST_LIBS=-lm -ldl -lpthread
@@ -244,9 +241,6 @@ $(OBJDIR):
 	mkdir -p $(OBJDIR) $(OBJDIR)/examples $(OBJDIR)/tests
 
 qjs$(EXE): $(QJS_OBJS)
-	$(CC) $(LDFLAGS) $(LDEXPORT) -o $@ $^ $(LIBS)
-
-qjs_sc: $(QJS_SC_OBJS)
 	$(CC) $(LDFLAGS) $(LDEXPORT) -o $@ $^ $(LIBS)
 
 libquickjs.so: $(QJS_OBJS)

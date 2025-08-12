@@ -16224,10 +16224,13 @@ void dump_bc_trace(){
 
 const char *trace_func_names[] = {
     "modExp",
-    "buildComponentData",
     "quantizeAndInverse",
-    "branch",
-    "loop",
+    "branch1",
+    "branch2",
+    "branch3",
+    "loop1",
+    "loop2",
+    "loop3",
 };
 
 /* argv[] is modified if (flags & JS_CALL_FLAG_COPY_ARGV) = 0. */
