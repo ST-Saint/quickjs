@@ -229,7 +229,7 @@ QJS_OBJS=$(OBJDIR)/qjs.o $(OBJDIR)/repl.o $(QJS_LIB_OBJS)
 
 OBJLLCTDIR=$(OBJDIR)/llct
 QJS_LIB_LLCT_OBJS=$(OBJLLCTDIR)/quickjs.o $(OBJLLCTDIR)/libregexp.o $(OBJLLCTDIR)/libunicode.o $(OBJLLCTDIR)/cutils.o $(OBJLLCTDIR)/quickjs-libc.o $(OBJLLCTDIR)/libbf.o
-QJS_LLCT_OBJS=$(OBJDIR)/qjs.o $(OBJDIR)/repl.o $(QJS_LIB_LLCT_OBJS)
+QJS_LLCT_OBJS=$(OBJDIR)/llct/qjs.o $(OBJDIR)/repl.o $(QJS_LIB_LLCT_OBJS)
 
 OBJDBGDIR=$(OBJDIR)/debug
 QJS_LIB_DEBUG_OBJS=$(OBJDBGDIR)/quickjs.o $(OBJDBGDIR)/libregexp.o $(OBJDBGDIR)/libunicode.o $(OBJDBGDIR)/cutils.o $(OBJDBGDIR)/quickjs-libc.o $(OBJDBGDIR)/libbf.o
@@ -263,8 +263,8 @@ qjs_llct$(EXE): $(QJS_LLCT_OBJS)
 qjs_debug$(EXE): $(QJS_DBG_OBJS)
 	$(CC) $(LLCTFLAGS) $(LDFLAGS) $(LDEXPORT) -o $@ $^ $(LIBS)
 
-libquickjs.so: $(QJS_OBJS)
-	$(CC) $(LDFLAGS) -shared -fPIC -o $@ $^ $(LIBS)
+libquickjs.so: $(QJS_LLCT_OBJS)
+	$(CC) $(LLCTFLAGS) $(LDFLAGS) -shared -fPIC -o $@ $^ $(LIBS)
 
 qjs-debug$(EXE): $(patsubst %.o, %.debug.o, $(QJS_OBJS))
 	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
