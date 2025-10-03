@@ -22,14 +22,12 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-#include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <inttypes.h>
 #include <string.h>
 #include <assert.h>
-#include <sys/stat.h>
 #include <sys/time.h>
 #include <time.h>
 #include <fenv.h>
@@ -42,15 +40,20 @@
 #include <malloc_np.h>
 #endif
 
-#include <sched.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <x86intrin.h>
 #include "cutils.h"
 #include "list.h"
 #include "quickjs.h"
 #include "libregexp.h"
 #include "libbf.h"
+
+#ifdef LLCT_INST
+#include <stdint.h>
+#include <sys/stat.h>
+#include <sched.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <x86intrin.h>
+#endif
 
 #define OPTIMIZE         1
 #define SHORT_OPCODES    1
@@ -95,7 +98,7 @@
   32: dump line number table
   64: dump compute_stack_size
  */
-#define DUMP_BYTECODE  (1|16)
+//#define DUMP_BYTECODE  (1)
 /* dump the occurence of the automatic GC */
 //#define DUMP_GC
 /* dump objects freed by the garbage collector */
@@ -1203,7 +1206,7 @@ static JSValue js_typed_array_constructor(JSContext *ctx,
 static JSValue js_typed_array_constructor_ta(JSContext *ctx,
                                              JSValueConst new_target,
                                              JSValueConst src_obj,
-                                             int classid);
+int classid);
 static BOOL typed_array_is_detached(JSContext *ctx, JSObject *p);
 static uint32_t typed_array_get_length(JSContext *ctx, JSObject *p);
 static JSValue JS_ThrowTypeErrorDetachedArrayBuffer(JSContext *ctx);
@@ -2909,7 +2912,7 @@ static void JS_FreeAtomStruct(JSRuntime *rt, JSAtomStruct *p)
         uint32_t h0;
 
         h0 = p->hash & (rt->atom_hash_size - 1);
-        i = rt->atom_hash[h0];
+i = rt->atom_hash[h0];
         p1 = rt->atom_array[i];
         if (p1 == p) {
             rt->atom_hash[h0] = p1->hash_next;
@@ -16139,6 +16142,7 @@ typedef enum {
 #define FUNC_RET_INITIAL_YIELD 3
 
 
+#ifdef LLCT_INST
 static uint32_t gtruth_index = 0;
 static uint64_t gtruth_records[1<<22][2];
 
@@ -16232,6 +16236,7 @@ const char *trace_func_names[] = {
     "loop2",
     "loop3",
 };
+#endif
 
 /* argv[] is modified if (flags & JS_CALL_FLAG_COPY_ARGV) = 0. */
 static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
@@ -16248,7 +16253,9 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     JSValue *local_buf, *stack_buf, *var_buf, *arg_buf, *sp, ret_val, *pval;
     JSVarRef **var_refs;
     size_t alloca_size;
+#ifdef LLCT_INST
     const char* func_name = NULL;
+#endif
 
 #if !DIRECT_DISPATCH
 #define SWITCH(pc)      switch (opcode = *pc++)
@@ -16266,8 +16273,8 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
 #include "quickjs-opcode.h"
         [ OP_COUNT ... 255 ] = &&case_default
     };
+#ifdef LLCT_INST
     memcpy(quickjs_dispatch_table, dispatch_table, sizeof(dispatch_table));
-    /* #define SWITCH(pc)      goto *dispatch_table[opcode = *pc++]; */
     uint32_t aux;
 #define SWITCH(PC) {                                            \
         opcode = *pc;                                           \
@@ -16282,6 +16289,9 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
         ++pc;                                                   \
         goto *dispatch_table[opcode];                           \
     }
+#else
+#define SWITCH(pc)      goto *dispatch_table[opcode = *pc++];
+#endif
 #define CASE(op)        case_ ## op
 #define DEFAULT         case_default
 #define BREAK           SWITCH(pc)
@@ -16368,10 +16378,10 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     pc = b->byte_code_buf;
     sf->prev_frame = rt->current_stack_frame;
     rt->current_stack_frame = sf;
-    ctx = b->realm; /* set the current realm */
+    ctx = b->realm; /* set the current func */
 
+#ifdef LLCT_INST
     func_name = get_func_name(ctx, func_obj);
-
     if( func_name != NULL ){
 
         for (int i = 0; i < sizeof(trace_func_names)/sizeof(trace_func_names[0]); i++) {
@@ -16390,6 +16400,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
         fwrite(b->byte_code_buf, sizeof(unsigned char), b->byte_code_len, file);
         fclose(file);
     }
+#endif
 
  restart:
     for(;;) {
@@ -16715,7 +16726,9 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             has_call_argc:
                 call_argv = sp - call_argc;
                 sf->cur_pc = pc;
+#ifdef LLCT_INST
                 dump_bc_trace();
+#endif
                 ret_val = JS_CallInternal(ctx, call_argv[-1], JS_UNDEFINED,
                                           JS_UNDEFINED, call_argc, call_argv, 0);
                 if (unlikely(JS_IsException(ret_val)))
@@ -17357,20 +17370,26 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             pc += (int32_t)get_u32(pc);
             if (unlikely(js_poll_interrupts(ctx)))
                 goto exception;
+#ifdef LLCT_INST
             dump_bc_trace();
+#endif
             BREAK;
 #if SHORT_OPCODES
         CASE(OP_goto16):
             pc += (int16_t)get_u16(pc);
             if (unlikely(js_poll_interrupts(ctx)))
                 goto exception;
+#ifdef LLCT_INST
             dump_bc_trace();
+#endif
             BREAK;
         CASE(OP_goto8):
             pc += (int8_t)pc[0];
             if (unlikely(js_poll_interrupts(ctx)))
                 goto exception;
+#ifdef LLCT_INST
             dump_bc_trace();
+#endif
             BREAK;
 #endif
         CASE(OP_if_true):
@@ -17392,7 +17411,9 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                 if (unlikely(js_poll_interrupts(ctx)))
                     goto exception;
             }
+#ifdef LLCT_INST
             dump_bc_trace();
+#endif
             BREAK;
         CASE(OP_if_false):
             {
@@ -17414,7 +17435,9 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                 if (unlikely(js_poll_interrupts(ctx)))
                     goto exception;
             }
+#ifdef LLCT_INST
             dump_bc_trace();
+#endif
             BREAK;
 #if SHORT_OPCODES
         CASE(OP_if_true8):
@@ -17436,7 +17459,9 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                 if (unlikely(js_poll_interrupts(ctx)))
                     goto exception;
             }
+#ifdef LLCT_INST
             dump_bc_trace();
+#endif
             BREAK;
         CASE(OP_if_false8):
             {
@@ -17457,7 +17482,9 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                 if (unlikely(js_poll_interrupts(ctx)))
                     goto exception;
             }
+#ifdef LLCT_INST
             dump_bc_trace();
+#endif
             BREAK;
 #endif
         CASE(OP_catch):
@@ -18815,6 +18842,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
         sf->cur_sp = sp;
     } else {
     done:
+#ifdef LLCT_INST
         if( func_name!=NULL){
             for (int i = 0; i < sizeof(trace_func_names)/sizeof(trace_func_names[0]); i++) {
                 if (strcmp(func_name, trace_func_names[i]) == 0) {
@@ -18824,6 +18852,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                 }
             }
         }
+#endif
         if (unlikely(!list_empty(&sf->var_ref_list))) {
             /* variable references reference the stack: must close them */
             close_var_refs(rt, sf);
@@ -18835,7 +18864,9 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     }
     rt->current_stack_frame = sf->prev_frame;
 
+#ifdef LLCT_INST
     dump_bc_trace();
+#endif
 
     return ret_val;
 }

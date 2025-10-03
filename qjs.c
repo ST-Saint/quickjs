@@ -40,7 +40,9 @@
 #include <malloc_np.h>
 #endif
 
+#ifdef LLCT_INST
 #include <x86intrin.h>
+#endif
 #include "cutils.h"
 #include "quickjs-libc.h"
 
@@ -58,34 +60,6 @@ static int eval_buf(JSContext *ctx, const void *buf, int buf_len,
     JSValue val;
     int ret;
 
-    if ((eval_flags & JS_EVAL_TYPE_MASK) == JS_EVAL_TYPE_MODULE) {
-        /* for the modules, we compile then run to be able to set
-           import.meta */
-        val = JS_Eval(ctx, buf, buf_len, filename,
-                      eval_flags | JS_EVAL_FLAG_COMPILE_ONLY);
-        if (!JS_IsException(val)) {
-            js_module_set_import_meta(ctx, val, TRUE, TRUE);
-            val = JS_EvalFunction(ctx, val);
-        }
-        val = js_std_await(ctx, val);
-    } else {
-        val = JS_Eval(ctx, buf, buf_len, filename, eval_flags);
-    }
-    if (JS_IsException(val)) {
-        js_std_dump_error(ctx);
-        ret = -1;
-    } else {
-        ret = 0;
-    }
-    JS_FreeValue(ctx, val);
-    return ret;
-}
-
-int js_std_eval_buf(JSContext *ctx, const void *buf, int buf_len,
-                    const char *filename, int eval_flags)
-{
-    JSValue val;
-    int ret;
     if ((eval_flags & JS_EVAL_TYPE_MASK) == JS_EVAL_TYPE_MODULE) {
         /* for the modules, we compile then run to be able to set
            import.meta */
@@ -134,6 +108,35 @@ static int eval_file(JSContext *ctx, const char *filename, int module)
     return ret;
 }
 
+#ifdef LLCT_INST
+int js_std_eval_buf(JSContext *ctx, const void *buf, int buf_len,
+                    const char *filename, int eval_flags)
+{
+    JSValue val;
+    int ret;
+    if ((eval_flags & JS_EVAL_TYPE_MASK) == JS_EVAL_TYPE_MODULE) {
+        /* for the modules, we compile then run to be able to set
+           import.meta */
+        val = JS_Eval(ctx, buf, buf_len, filename,
+                      eval_flags | JS_EVAL_FLAG_COMPILE_ONLY);
+        if (!JS_IsException(val)) {
+            js_module_set_import_meta(ctx, val, TRUE, TRUE);
+            val = JS_EvalFunction(ctx, val);
+        }
+        val = js_std_await(ctx, val);
+    } else {
+        val = JS_Eval(ctx, buf, buf_len, filename, eval_flags);
+    }
+    if (JS_IsException(val)) {
+        js_std_dump_error(ctx);
+        ret = -1;
+    } else {
+        ret = 0;
+    }
+    JS_FreeValue(ctx, val);
+    return ret;
+}
+
 int js_std_eval_file(JSContext *ctx, const char *filename, int module)
 {
     uint8_t *buf;
@@ -158,6 +161,7 @@ int js_std_eval_file(JSContext *ctx, const char *filename, int module)
     js_free(ctx, buf);
     return ret;
 }
+#endif
 
 /* also used to initialize the worker context */
 static JSContext *JS_NewCustomContext(JSRuntime *rt)

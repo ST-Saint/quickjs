@@ -53,12 +53,13 @@ void js_std_promise_rejection_tracker(JSContext *ctx, JSValueConst promise,
                                       JS_BOOL is_handled, void *opaque);
 void js_std_set_worker_new_context_func(JSContext *(*func)(JSRuntime *rt));
 
+#ifdef LLCT_INST
 int js_std_eval_file(JSContext *ctx, const char *filename, int module);
 int js_std_eval_buf(JSContext *ctx, const void *buf, int buf_len,
                     const char *filename, int eval_flags);
-
 void js_std_dump_record(const char* filename);
 void js_std_reset_ground_truth();
+#endif
 
 #ifdef __cplusplus
 } /* extern "C" { */

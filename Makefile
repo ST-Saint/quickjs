@@ -187,7 +187,7 @@ CONFIG_SHARED_LIBS=y # building shared libraries is supported
 endif
 endif
 
-PROGS=qjs$(EXE) qjsc$(EXE) run-test262
+PROGS=qjs$(EXE) qjsc$(EXE) qjs_llct$(EXE) qjs_debug$(EXE) run-test262
 ifneq ($(CROSS_PREFIX),)
 QJSC_CC=gcc
 QJSC=./host-qjsc
@@ -226,8 +226,19 @@ all: $(OBJDIR) $(OBJDIR)/quickjs.check.o $(OBJDIR)/qjs.check.o $(PROGS) libquick
 QJS_LIB_OBJS=$(OBJDIR)/quickjs.o $(OBJDIR)/libregexp.o $(OBJDIR)/libunicode.o $(OBJDIR)/cutils.o $(OBJDIR)/quickjs-libc.o $(OBJDIR)/libbf.o
 
 QJS_OBJS=$(OBJDIR)/qjs.o $(OBJDIR)/repl.o $(QJS_LIB_OBJS)
+
+OBJLLCTDIR=$(OBJDIR)/llct
+QJS_LIB_LLCT_OBJS=$(OBJLLCTDIR)/quickjs.o $(OBJLLCTDIR)/libregexp.o $(OBJLLCTDIR)/libunicode.o $(OBJLLCTDIR)/cutils.o $(OBJLLCTDIR)/quickjs-libc.o $(OBJLLCTDIR)/libbf.o
+QJS_LLCT_OBJS=$(OBJDIR)/qjs.o $(OBJDIR)/repl.o $(QJS_LIB_LLCT_OBJS)
+
+OBJDBGDIR=$(OBJDIR)/debug
+QJS_LIB_DEBUG_OBJS=$(OBJDBGDIR)/quickjs.o $(OBJDBGDIR)/libregexp.o $(OBJDBGDIR)/libunicode.o $(OBJDBGDIR)/cutils.o $(OBJDBGDIR)/quickjs-libc.o $(OBJDBGDIR)/libbf.o
+QJS_DBG_OBJS=$(OBJDIR)/qjs.o $(OBJDIR)/repl.o $(QJS_LIB_DEBUG_OBJS)
+
 ifdef CONFIG_BIGNUM
 QJS_OBJS+=$(OBJDIR)/qjscalc.o
+QJS_LLCT_OBJS+=$(OBJLLCTDIR)/qjscalc.o
+QJS_DBG_OBJS+=$(OBJDBGDIR)/qjscalc.o
 endif
 
 HOST_LIBS=-lm -ldl -lpthread
@@ -237,11 +248,20 @@ LIBS+=-ldl -lpthread
 endif
 LIBS+=$(EXTRA_LIBS)
 
+LLCTFLAGS = -DLLCT_INST
+DBGFLAGS = -DDUMP_BYTECODE=17
+
 $(OBJDIR):
-	mkdir -p $(OBJDIR) $(OBJDIR)/examples $(OBJDIR)/tests
+	mkdir -p $(OBJDIR) $(OBJDIR)/examples $(OBJDIR)/tests $(OBJLLCTDIR) $(OBJDBGDIR)
 
 qjs$(EXE): $(QJS_OBJS)
 	$(CC) $(LDFLAGS) $(LDEXPORT) -o $@ $^ $(LIBS)
+
+qjs_llct$(EXE): $(QJS_LLCT_OBJS)
+	$(CC) $(LLCTFLAGS) $(LDFLAGS) $(LDEXPORT) -o $@ $^ $(LIBS)
+
+qjs_debug$(EXE): $(QJS_DBG_OBJS)
+	$(CC) $(LLCTFLAGS) $(LDFLAGS) $(LDEXPORT) -o $@ $^ $(LIBS)
 
 libquickjs.so: $(QJS_OBJS)
 	$(CC) $(LDFLAGS) -shared -fPIC -o $@ $^ $(LIBS)
@@ -320,6 +340,12 @@ run-test262-32: $(patsubst %.o, %.m32.o, $(OBJDIR)/run-test262.o $(QJS_LIB_OBJS)
 
 $(OBJDIR)/%.o: %.c | $(OBJDIR)
 	$(CC) $(CFLAGS_OPT) -c -o $@ $<
+
+$(OBJDIR)/llct/%.o: %.c | $(OBJDIR)
+	$(CC) $(LLCTFLAGS) $(CFLAGS_OPT) -c -o $@ $<
+
+$(OBJDIR)/debug/%.o: %.c | $(OBJDIR)
+	$(CC) $(DBGFLAGS) $(LLCTFLAGS) $(CFLAGS_OPT) -c -o $@ $<
 
 $(OBJDIR)/%.host.o: %.c | $(OBJDIR)
 	$(HOST_CC) $(CFLAGS_OPT) -c -o $@ $<
