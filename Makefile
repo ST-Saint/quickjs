@@ -249,6 +249,7 @@ endif
 LIBS+=$(EXTRA_LIBS)
 
 LLCTFLAGS = -DLLCT_INST
+LLCT_DBG_FLAGS = -DLLCT_INST -DLLCT_PROF
 DBGFLAGS = -DDUMP_BYTECODE=17
 
 $(OBJDIR):
@@ -261,7 +262,7 @@ qjs_llct$(EXE): $(QJS_LLCT_OBJS)
 	$(CC) $(LLCTFLAGS) $(LDFLAGS) $(LDEXPORT) -o $@ $^ $(LIBS)
 
 qjs_debug$(EXE): $(QJS_DBG_OBJS)
-	$(CC) $(LLCTFLAGS) $(LDFLAGS) $(LDEXPORT) -o $@ $^ $(LIBS)
+	$(CC) $(LLCT_DBG_FLAGS) $(LDFLAGS) $(LDEXPORT) -o $@ $^ $(LIBS)
 
 libquickjs.so: $(QJS_LLCT_OBJS)
 	$(CC) $(LLCTFLAGS) $(LDFLAGS) -shared -fPIC -o $@ $^ $(LIBS)
@@ -345,7 +346,7 @@ $(OBJDIR)/llct/%.o: %.c | $(OBJDIR)
 	$(CC) $(LLCTFLAGS) $(CFLAGS_OPT) -c -o $@ $<
 
 $(OBJDIR)/debug/%.o: %.c | $(OBJDIR)
-	$(CC) $(DBGFLAGS) $(LLCTFLAGS) $(CFLAGS_OPT) -c -o $@ $<
+	$(CC) $(DBGFLAGS) $(LLCT_DBG_FLAGS) $(CFLAGS_OPT) -c -o $@ $<
 
 $(OBJDIR)/%.host.o: %.c | $(OBJDIR)
 	$(HOST_CC) $(CFLAGS_OPT) -c -o $@ $<

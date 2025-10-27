@@ -16143,6 +16143,10 @@ typedef enum {
 
 
 #ifdef LLCT_INST
+void* quickjs_dispatch_table[256];
+#endif
+
+#ifdef LLCT_PROF
 static uint32_t gtruth_index = 0;
 static uint64_t gtruth_records[1<<22][2];
 
@@ -16196,8 +16200,6 @@ static void wrmsr_IBPB(uint32_t reg, const char* regvals) {
 
     return;
 }
-
-void* quickjs_dispatch_table[256];
 
 #define TRACE_LOG_SIZE (1<<20)
 struct bc_trace_t {
@@ -16253,7 +16255,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     JSValue *local_buf, *stack_buf, *var_buf, *arg_buf, *sp, ret_val, *pval;
     JSVarRef **var_refs;
     size_t alloca_size;
-#ifdef LLCT_INST
+#ifdef LLCT_PROF
     const char* func_name = NULL;
 #endif
 
@@ -16275,6 +16277,8 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     };
 #ifdef LLCT_INST
     memcpy(quickjs_dispatch_table, dispatch_table, sizeof(dispatch_table));
+#endif
+#ifdef LLCT_PROF
     uint32_t aux;
 #define SWITCH(PC) {                                            \
         opcode = *pc;                                           \
@@ -16380,7 +16384,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     rt->current_stack_frame = sf;
     ctx = b->realm; /* set the current func */
 
-#ifdef LLCT_INST
+#ifdef LLCT_PROF
     func_name = get_func_name(ctx, func_obj);
     if( func_name != NULL ){
 
@@ -16726,7 +16730,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             has_call_argc:
                 call_argv = sp - call_argc;
                 sf->cur_pc = pc;
-#ifdef LLCT_INST
+#ifdef LLCT_PROF
                 dump_bc_trace();
 #endif
                 ret_val = JS_CallInternal(ctx, call_argv[-1], JS_UNDEFINED,
@@ -17370,7 +17374,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             pc += (int32_t)get_u32(pc);
             if (unlikely(js_poll_interrupts(ctx)))
                 goto exception;
-#ifdef LLCT_INST
+#ifdef LLCT_PROF
             dump_bc_trace();
 #endif
             BREAK;
@@ -17379,7 +17383,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             pc += (int16_t)get_u16(pc);
             if (unlikely(js_poll_interrupts(ctx)))
                 goto exception;
-#ifdef LLCT_INST
+#ifdef LLCT_PROF
             dump_bc_trace();
 #endif
             BREAK;
@@ -17387,7 +17391,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             pc += (int8_t)pc[0];
             if (unlikely(js_poll_interrupts(ctx)))
                 goto exception;
-#ifdef LLCT_INST
+#ifdef LLCT_PROF
             dump_bc_trace();
 #endif
             BREAK;
@@ -17411,7 +17415,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                 if (unlikely(js_poll_interrupts(ctx)))
                     goto exception;
             }
-#ifdef LLCT_INST
+#ifdef LLCT_PROF
             dump_bc_trace();
 #endif
             BREAK;
@@ -17435,7 +17439,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                 if (unlikely(js_poll_interrupts(ctx)))
                     goto exception;
             }
-#ifdef LLCT_INST
+#ifdef LLCT_PROF
             dump_bc_trace();
 #endif
             BREAK;
@@ -17459,7 +17463,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                 if (unlikely(js_poll_interrupts(ctx)))
                     goto exception;
             }
-#ifdef LLCT_INST
+#ifdef LLCT_PROF
             dump_bc_trace();
 #endif
             BREAK;
@@ -17482,7 +17486,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                 if (unlikely(js_poll_interrupts(ctx)))
                     goto exception;
             }
-#ifdef LLCT_INST
+#ifdef LLCT_PROF
             dump_bc_trace();
 #endif
             BREAK;
@@ -18842,7 +18846,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
         sf->cur_sp = sp;
     } else {
     done:
-#ifdef LLCT_INST
+#ifdef LLCT_PROF
         if( func_name!=NULL){
             for (int i = 0; i < sizeof(trace_func_names)/sizeof(trace_func_names[0]); i++) {
                 if (strcmp(func_name, trace_func_names[i]) == 0) {
@@ -18864,7 +18868,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     }
     rt->current_stack_frame = sf->prev_frame;
 
-#ifdef LLCT_INST
+#ifdef LLCT_PROF
     dump_bc_trace();
 #endif
 
