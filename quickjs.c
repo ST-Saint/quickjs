@@ -16146,9 +16146,11 @@ typedef enum {
 void* quickjs_dispatch_table[256];
 #endif
 
-#ifdef LLCT_PROF
+
+#ifdef LLCT_GRTH
+#define GTRUTH_ARR_SIZE (1<<22)
 static uint32_t gtruth_index = 0;
-static uint64_t gtruth_records[1<<22][2];
+static uint64_t gtruth_records[GTRUTH_ARR_SIZE][2];
 
 void js_std_reset_ground_truth(){
     memset(gtruth_records, 0, sizeof(gtruth_records));
@@ -16200,7 +16202,9 @@ static void wrmsr_IBPB(uint32_t reg, const char* regvals) {
 
     return;
 }
+#endif
 
+#ifdef LLCT_PROF
 #define TRACE_LOG_SIZE (1<<20)
 struct bc_trace_t {
     const char* func_name;
@@ -16293,6 +16297,18 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
         ++pc;                                                   \
         goto *dispatch_table[opcode];                           \
     }
+#elif LLCT_GRTH
+    uint32_t aux;
+#define SWITCH(PC) {                                                \
+        opcode = *pc;                                               \
+        if( opcode == OP_goto8 ){                                   \
+            gtruth_records[gtruth_index][0] = __rdtscp(&aux);       \
+            gtruth_records[gtruth_index++][1] = OP_goto8;           \
+            if( gtruth_index ==GTRUTH_ARR_SIZE ) gtruth_index = 0;  \
+        }                                                           \
+        ++pc;                                                       \
+        goto *dispatch_table[opcode];                               \
+}
 #else
 #define SWITCH(pc)      goto *dispatch_table[opcode = *pc++];
 #endif

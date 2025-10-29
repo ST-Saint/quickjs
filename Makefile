@@ -221,7 +221,7 @@ endif
 endif
 endif
 
-all: $(OBJDIR) $(OBJDIR)/quickjs.check.o $(OBJDIR)/qjs.check.o $(PROGS) libquickjs.so
+all: $(OBJDIR) $(OBJDIR)/quickjs.check.o $(OBJDIR)/qjs.check.o $(PROGS) libquickjs.so libqjs_grth.so
 
 QJS_LIB_OBJS=$(OBJDIR)/quickjs.o $(OBJDIR)/libregexp.o $(OBJDIR)/libunicode.o $(OBJDIR)/cutils.o $(OBJDIR)/quickjs-libc.o $(OBJDIR)/libbf.o
 
@@ -231,14 +231,20 @@ OBJLLCTDIR=$(OBJDIR)/llct
 QJS_LIB_LLCT_OBJS=$(OBJLLCTDIR)/quickjs.o $(OBJLLCTDIR)/libregexp.o $(OBJLLCTDIR)/libunicode.o $(OBJLLCTDIR)/cutils.o $(OBJLLCTDIR)/quickjs-libc.o $(OBJLLCTDIR)/libbf.o
 QJS_LLCT_OBJS=$(OBJDIR)/llct/qjs.o $(OBJDIR)/repl.o $(QJS_LIB_LLCT_OBJS)
 
-OBJDBGDIR=$(OBJDIR)/debug
-QJS_LIB_DEBUG_OBJS=$(OBJDBGDIR)/quickjs.o $(OBJDBGDIR)/libregexp.o $(OBJDBGDIR)/libunicode.o $(OBJDBGDIR)/cutils.o $(OBJDBGDIR)/quickjs-libc.o $(OBJDBGDIR)/libbf.o
+OBJ_GRTH_DIR=$(OBJDIR)/grth
+QJS_LIB_GRTH_OBJS=$(OBJ_GRTH_DIR)/quickjs.o $(OBJ_GRTH_DIR)/libregexp.o $(OBJ_GRTH_DIR)/libunicode.o $(OBJ_GRTH_DIR)/cutils.o $(OBJ_GRTH_DIR)/quickjs-libc.o $(OBJ_GRTH_DIR)/libbf.o
+QJS_GRTH_OBJS=$(OBJDIR)/grth/qjs.o $(OBJDIR)/repl.o $(QJS_LIB_GRTH_OBJS)
+
+
+OBJ_DBG_DIR=$(OBJDIR)/debug
+QJS_LIB_DEBUG_OBJS=$(OBJ_DBG_DIR)/quickjs.o $(OBJ_DBG_DIR)/libregexp.o $(OBJ_DBG_DIR)/libunicode.o $(OBJ_DBG_DIR)/cutils.o $(OBJ_DBG_DIR)/quickjs-libc.o $(OBJ_DBG_DIR)/libbf.o
 QJS_DBG_OBJS=$(OBJDIR)/qjs.o $(OBJDIR)/repl.o $(QJS_LIB_DEBUG_OBJS)
 
 ifdef CONFIG_BIGNUM
 QJS_OBJS+=$(OBJDIR)/qjscalc.o
 QJS_LLCT_OBJS+=$(OBJLLCTDIR)/qjscalc.o
-QJS_DBG_OBJS+=$(OBJDBGDIR)/qjscalc.o
+QJS_GRTH_OBJS+=$(OBJ_GRTH_DIR)/qjscalc.o
+QJS_DBG_OBJS+=$(OBJ_DBG_DIR)/qjscalc.o
 endif
 
 HOST_LIBS=-lm -ldl -lpthread
@@ -249,11 +255,12 @@ endif
 LIBS+=$(EXTRA_LIBS)
 
 LLCTFLAGS = -DLLCT_INST
-LLCT_DBG_FLAGS = -DLLCT_INST -DLLCT_PROF
+LLCT_PROF_FLAGS = -DLLCT_INST -DLLCT_PROF
+LLCT_GRTH_FLAGS = -DLLCT_INST -DLLCT_GRTH
 DBGFLAGS = -DDUMP_BYTECODE=17
 
 $(OBJDIR):
-	mkdir -p $(OBJDIR) $(OBJDIR)/examples $(OBJDIR)/tests $(OBJLLCTDIR) $(OBJDBGDIR)
+	mkdir -p $(OBJDIR) $(OBJDIR)/examples $(OBJDIR)/tests $(OBJLLCTDIR) $(OBJ_GRTH_DIR) $(OBJ_DBG_DIR)
 
 qjs$(EXE): $(QJS_OBJS)
 	$(CC) $(LDFLAGS) $(LDEXPORT) -o $@ $^ $(LIBS)
@@ -262,10 +269,13 @@ qjs_llct$(EXE): $(QJS_LLCT_OBJS)
 	$(CC) $(LLCTFLAGS) $(LDFLAGS) $(LDEXPORT) -o $@ $^ $(LIBS)
 
 qjs_debug$(EXE): $(QJS_DBG_OBJS)
-	$(CC) $(LLCT_DBG_FLAGS) $(LDFLAGS) $(LDEXPORT) -o $@ $^ $(LIBS)
+	$(CC) $(LLCT_PROF_FLAGS) $(LDFLAGS) $(LDEXPORT) -o $@ $^ $(LIBS)
 
 libquickjs.so: $(QJS_LLCT_OBJS)
 	$(CC) $(LLCTFLAGS) $(LDFLAGS) -shared -fPIC -o $@ $^ $(LIBS)
+
+libqjs_grth.so: $(QJS_GRTH_OBJS)
+	$(CC) $(LLCT_GRTH_FLAGS) $(LDFLAGS) -shared -fPIC -o $@ $^ $(LIBS)
 
 qjs-debug$(EXE): $(patsubst %.o, %.debug.o, $(QJS_OBJS))
 	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
@@ -345,8 +355,11 @@ $(OBJDIR)/%.o: %.c | $(OBJDIR)
 $(OBJDIR)/llct/%.o: %.c | $(OBJDIR)
 	$(CC) $(LLCTFLAGS) $(CFLAGS_OPT) -c -o $@ $<
 
+$(OBJDIR)/grth/%.o: %.c | $(OBJDIR)
+	$(CC) $(LLCT_GRTH_FLAGS) $(CFLAGS_OPT) -c -o $@ $<
+
 $(OBJDIR)/debug/%.o: %.c | $(OBJDIR)
-	$(CC) $(DBGFLAGS) $(LLCT_DBG_FLAGS) $(CFLAGS_OPT) -c -o $@ $<
+	$(CC) $(DBGFLAGS) $(LLCT_PROF_FLAGS) $(CFLAGS_OPT) -c -o $@ $<
 
 $(OBJDIR)/%.host.o: %.c | $(OBJDIR)
 	$(HOST_CC) $(CFLAGS_OPT) -c -o $@ $<
