@@ -359,7 +359,7 @@ $(OBJDIR)/grth/%.o: %.c | $(OBJDIR)
 	$(CC) $(LLCT_GRTH_FLAGS) $(CFLAGS_OPT) -c -o $@ $<
 
 $(OBJDIR)/debug/%.o: %.c | $(OBJDIR)
-	$(CC) $(DBGFLAGS) $(LLCT_PROF_FLAGS) $(CFLAGS_OPT) -c -o $@ $<
+	$(CC) $(DBGFLAGS) $(LLCT_PROF_FLAGS) $(CFLAGS_DEBUG) -c -o $@ $<
 
 $(OBJDIR)/%.host.o: %.c | $(OBJDIR)
 	$(HOST_CC) $(CFLAGS_OPT) -c -o $@ $<
